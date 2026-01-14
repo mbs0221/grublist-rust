@@ -37,7 +37,7 @@ fn print_banner(bcolors: &Bcolors) {
     ║                                                   ║
     ╚═══════════════════════════════════════════════════╝
     "#, bold, endc)));
-    println!("{}Controls: ↑↓ Navigate  →/Enter Select  ESC Back/Quit  / Search{}\n", 
+    println!("{}Controls: ↑↓ Navigate  →/Enter Select  ESC Back/Quit  Type to Search{}\n", 
              bcolors.okblue(""), bcolors.endc());
 }
 
@@ -616,7 +616,7 @@ fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
         } else {
             println!("{}Navigate to the boot entry and press Enter to select{}", 
                     bcolors.okblue(""), bcolors.endc());
-            println!("{}Press / to search, ESC to cancel{}", bcolors.okblue(""), bcolors.endc());
+            println!("{}Type to search, ESC to cancel{}", bcolors.okblue(""), bcolors.endc());
             println!();
             
             print_entry_only(&entry, &path, 0, bcolors);
