@@ -311,8 +311,9 @@ impl App {
                                     }
                                 }
                             }
-                            KeyCode::Enter => {
-                                if let AppState::SelectBootEntry { path, selected, action } = &self.state {
+                            KeyCode::Enter | KeyCode::Right => {
+                                // Enter/Right: navigate into submenu only
+                                if let AppState::SelectBootEntry { path, selected, .. } = &self.state {
                                     let entry_ref = if path.is_empty() {
                                         &self.entry
                                     } else {
@@ -320,80 +321,13 @@ impl App {
                                     };
                                     if state_snapshot.1 < entry_ref.children.len() {
                                         let child = &entry_ref.children[state_snapshot.1];
-                                        if child.entry_type == EntryType::MenuEntry {
-                                            let mut result_path = path.clone();
-                                            result_path.push(state_snapshot.1);
-                                            let entry_name = child.name.clone();
-                                            
-                                            match action {
-                                                Some(SelectBootEntryAction::ViewKernelInfo) => {
-                                                    let kernel_info = kernel_info::get_kernel_version_from_entry(&entry_name);
-                                                    self.state = AppState::ViewKernelInfo {
-                                                        path: result_path,
-                                                        kernel_info,
-                                                    };
-                                                }
-                                                None => {
-                                                    // Enter key: confirm set default
-                                                    self.state = AppState::ConfirmSetDefaultEntry {
-                                                        path: result_path,
-                                                        entry_name,
-                                                    };
-                                                }
-                                                _ => {}
-                                            }
-                                        } else if child.entry_type == EntryType::Submenu {
-                                            if let AppState::SelectBootEntry { path: p, selected: s, action: a } = &mut self.state {
+                                        if child.entry_type == EntryType::Submenu {
+                                            if let AppState::SelectBootEntry { path: p, selected: s, .. } = &mut self.state {
                                                 p.push(state_snapshot.1);
                                                 *s = 0;
                                             }
                                         }
-                                    }
-                                }
-                            }
-                            KeyCode::Right => {
-                                if let AppState::SelectBootEntry { path, selected, action } = &self.state {
-                                    let entry_ref = if path.is_empty() {
-                                        &self.entry
-                                    } else {
-                                        get_entry(&self.entry, path)
-                                    };
-                                    if state_snapshot.1 < entry_ref.children.len() {
-                                        let child = &entry_ref.children[state_snapshot.1];
-                                        if child.entry_type == EntryType::MenuEntry {
-                                            let mut result_path = path.clone();
-                                            result_path.push(state_snapshot.1);
-                                            let entry_name = child.name.clone();
-                                            
-                                            match action {
-                                                Some(SelectBootEntryAction::ViewKernelInfo) => {
-                                                    // Right key also works for ViewKernelInfo
-                                                    let kernel_info = kernel_info::get_kernel_version_from_entry(&entry_name);
-                                                    self.state = AppState::ViewKernelInfo {
-                                                        path: result_path,
-                                                        kernel_info,
-                                                    };
-                                                }
-                                                None => {
-                                                    // Right key: rename boot entry
-                                                    let custom_names = custom_names::CustomNames::load();
-                                                    let current_name = custom_names.get_custom_name(&result_path)
-                                                        .cloned()
-                                                        .unwrap_or_else(|| entry_name.clone());
-                                                    self.state = AppState::RenameBootEntry {
-                                                        path: result_path,
-                                                        original_name: entry_name,
-                                                        input_buffer: current_name,
-                                                    };
-                                                }
-                                                _ => {}
-                                            }
-                                        } else if child.entry_type == EntryType::Submenu {
-                                            if let AppState::SelectBootEntry { path: p, selected: s, action: a } = &mut self.state {
-                                                p.push(state_snapshot.1);
-                                                *s = 0;
-                                            }
-                                        }
+                                        // For MenuEntry, use i/y/e keys instead
                                     }
                                 }
                             }
@@ -408,10 +342,93 @@ impl App {
                                     }
                                 }
                             }
+                            KeyCode::Char('i') | KeyCode::Char('I') => {
+                                // View kernel info
+                                if let AppState::SelectBootEntry { path, selected, .. } = &self.state {
+                                    let entry_ref = if path.is_empty() {
+                                        &self.entry
+                                    } else {
+                                        get_entry(&self.entry, path)
+                                    };
+                                    if state_snapshot.1 < entry_ref.children.len() {
+                                        let child = &entry_ref.children[state_snapshot.1];
+                                        if child.entry_type == EntryType::MenuEntry {
+                                            let mut result_path = path.clone();
+                                            result_path.push(state_snapshot.1);
+                                            let entry_name = child.name.clone();
+                                            let kernel_info = kernel_info::get_kernel_version_from_entry(&entry_name);
+                                            self.state = AppState::ViewKernelInfo {
+                                                path: result_path,
+                                                kernel_info,
+                                            };
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                                // Confirm set default boot entry
+                                if let AppState::SelectBootEntry { path, selected, action } = &self.state {
+                                    let entry_ref = if path.is_empty() {
+                                        &self.entry
+                                    } else {
+                                        get_entry(&self.entry, path)
+                                    };
+                                    if state_snapshot.1 < entry_ref.children.len() {
+                                        let child = &entry_ref.children[state_snapshot.1];
+                                        if child.entry_type == EntryType::MenuEntry {
+                                            let mut result_path = path.clone();
+                                            result_path.push(state_snapshot.1);
+                                            let entry_name = child.name.clone();
+                                            
+                                            // Only allow if action is None (set default mode)
+                                            if action.is_none() {
+                                                self.state = AppState::ConfirmSetDefaultEntry {
+                                                    path: result_path,
+                                                    entry_name,
+                                                };
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char('e') | KeyCode::Char('E') => {
+                                // Edit boot entry name
+                                if let AppState::SelectBootEntry { path, selected, action } = &self.state {
+                                    let entry_ref = if path.is_empty() {
+                                        &self.entry
+                                    } else {
+                                        get_entry(&self.entry, path)
+                                    };
+                                    if state_snapshot.1 < entry_ref.children.len() {
+                                        let child = &entry_ref.children[state_snapshot.1];
+                                        if child.entry_type == EntryType::MenuEntry {
+                                            let mut result_path = path.clone();
+                                            result_path.push(state_snapshot.1);
+                                            let entry_name = child.name.clone();
+                                            
+                                            // Only allow if action is None (set default mode)
+                                            if action.is_none() {
+                                                let custom_names = custom_names::CustomNames::load();
+                                                let current_name = custom_names.get_custom_name(&result_path)
+                                                    .cloned()
+                                                    .unwrap_or_else(|| entry_name.clone());
+                                                self.state = AppState::RenameBootEntry {
+                                                    path: result_path,
+                                                    original_name: entry_name,
+                                                    input_buffer: current_name,
+                                                };
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             _ => {
                                 if let Some(c) = Self::key_to_char(&key) {
                                     if let AppState::SelectBootEntry { path, action, .. } = &self.state {
-                                        self.start_boot_entry_search(c, path.clone());
+                                        // Don't start search for i, y, e keys
+                                        if c != 'i' && c != 'I' && c != 'y' && c != 'Y' && c != 'e' && c != 'E' {
+                                            self.start_boot_entry_search(c, path.clone());
+                                        }
                                     }
                                 }
                             }
@@ -1441,7 +1458,6 @@ impl App {
                     ListItem::new("⚙ Configure Kernel Parameters"),
                     ListItem::new("⏱ Configure GRUB Timeout"),
                     ListItem::new("👁 View Default Boot Entry"),
-                    ListItem::new("ℹ️  View Kernel Info"),
                     ListItem::new("🧹 Cleanup Old Kernels"),
                     ListItem::new("💾 Backup Manager"),
                     ListItem::new("✓ Validate GRUB Config"),
