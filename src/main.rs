@@ -216,7 +216,7 @@ impl App {
                             }
                             KeyCode::Down => {
                                 if let AppState::MainMenu { selected } = &mut self.state {
-                                    *selected = (*selected + 1) % 9;
+                                    *selected = (*selected + 1) % 8;
                                 }
                             }
                             KeyCode::Enter | KeyCode::Right => {
