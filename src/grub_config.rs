@@ -123,7 +123,7 @@ impl GrubConfig {
     }
 }
 
-fn parse_parameters(cmdline: &str) -> Vec<String> {
+pub fn parse_parameters(cmdline: &str) -> Vec<String> {
     if cmdline.trim().is_empty() {
         return Vec::new();
     }
@@ -132,13 +132,11 @@ fn parse_parameters(cmdline: &str) -> Vec<String> {
         .collect()
 }
 
-fn join_parameters(params: &[String]) -> String {
+pub fn join_parameters(params: &[String]) -> String {
     params.join(" ")
 }
 
-use crate::colorprint;
-
-fn split_parameter(param: &str) -> (String, Option<String>) {
+pub fn split_parameter(param: &str) -> (String, Option<String>) {
     if let Some(pos) = param.find('=') {
         let name = param[..pos].to_string();
         let value = param[pos + 1..].to_string();
@@ -148,13 +146,15 @@ fn split_parameter(param: &str) -> (String, Option<String>) {
     }
 }
 
-fn format_parameter(name: &str, value: Option<&str>) -> String {
+pub fn format_parameter(name: &str, value: Option<&str>) -> String {
     if let Some(val) = value {
         format!("{}={}", name, val)
     } else {
         name.to_string()
     }
 }
+
+use crate::colorprint;
 
 fn edit_parameter_list(title: &str, params: &mut Vec<String>, bcolors: &colorprint::Bcolors) -> bool {
     use std::io::{self, Write};
@@ -321,13 +321,13 @@ pub fn edit_kernel_parameters(bcolors: &colorprint::Bcolors) -> bool {
         println!("{}Select configuration to edit:{}", bcolors.bold(), bcolors.endc());
         println!("  1. GRUB_CMDLINE_LINUX ({})", 
                 if linux_params.is_empty() { 
-                    bcolors.warning().to_string() + "empty" + bcolors.endc()
+                    format!("{}{}{}", bcolors.warning(), "empty", bcolors.endc())
                 } else { 
                     format!("{} parameters", linux_params.len())
                 });
         println!("  2. GRUB_CMDLINE_LINUX_DEFAULT ({})", 
                 if linux_default_params.is_empty() { 
-                    bcolors.warning().to_string() + "empty" + bcolors.endc()
+                    format!("{}{}{}", bcolors.warning(), "empty", bcolors.endc())
                 } else { 
                     format!("{} parameters", linux_default_params.len())
                 });

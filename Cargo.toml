@@ -16,5 +16,6 @@ path = "src/main.rs"
 
 [dependencies]
 regex = "1.10"
-termion = "2.0"
+ratatui = "0.27"
+crossterm = "0.28"
 
