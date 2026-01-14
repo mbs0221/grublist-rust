@@ -87,3 +87,22 @@ pub fn load_grub() -> Option<Entry> {
     Some(entry)
 }
 
+pub fn get_entry<'a>(root: &'a Entry, path: &[usize]) -> &'a Entry {
+    let mut e = root;
+    for &idx in path {
+        e = &e.children[idx];
+    }
+    e
+}
+
+pub fn try_get_entry<'a>(root: &'a Entry, path: &[usize]) -> Option<&'a Entry> {
+    let mut e = root;
+    for &idx in path {
+        if idx >= e.children.len() {
+            return None;
+        }
+        e = &e.children[idx];
+    }
+    Some(e)
+}
+

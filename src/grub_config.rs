@@ -7,6 +7,8 @@ pub struct GrubConfig {
     pub grub_default: String,
     pub grub_cmdline_linux: String,
     pub grub_cmdline_linux_default: String,
+    pub grub_timeout: String,
+    pub grub_timeout_style: String,
 }
 
 impl GrubConfig {
@@ -17,10 +19,14 @@ impl GrubConfig {
         let mut grub_default = String::new();
         let mut grub_cmdline_linux = String::new();
         let mut grub_cmdline_linux_default = String::new();
+        let mut grub_timeout = String::new();
+        let mut grub_timeout_style = String::new();
         
         let default_re = Regex::new(r#"^\s*GRUB_DEFAULT\s*=\s*(.+)$"#).unwrap();
         let cmdline_linux_re = Regex::new(r#"^\s*GRUB_CMDLINE_LINUX\s*=\s*(.+)$"#).unwrap();
         let cmdline_linux_default_re = Regex::new(r#"^\s*GRUB_CMDLINE_LINUX_DEFAULT\s*=\s*(.+)$"#).unwrap();
+        let timeout_re = Regex::new(r#"^\s*GRUB_TIMEOUT\s*=\s*(.+)$"#).unwrap();
+        let timeout_style_re = Regex::new(r#"^\s*GRUB_TIMEOUT_STYLE\s*=\s*(.+)$"#).unwrap();
         
         for line in BufReader::new(file).lines() {
             let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
@@ -31,13 +37,27 @@ impl GrubConfig {
                 grub_cmdline_linux = caps.get(1).unwrap().as_str().trim_matches('"').trim_matches('\'').to_string();
             } else if let Some(caps) = cmdline_linux_default_re.captures(&line) {
                 grub_cmdline_linux_default = caps.get(1).unwrap().as_str().trim_matches('"').trim_matches('\'').to_string();
+            } else if let Some(caps) = timeout_re.captures(&line) {
+                grub_timeout = caps.get(1).unwrap().as_str().trim_matches('"').trim_matches('\'').to_string();
+            } else if let Some(caps) = timeout_style_re.captures(&line) {
+                grub_timeout_style = caps.get(1).unwrap().as_str().trim_matches('"').trim_matches('\'').to_string();
             }
+        }
+        
+        // Set defaults if not found
+        if grub_timeout.is_empty() {
+            grub_timeout = "5".to_string();
+        }
+        if grub_timeout_style.is_empty() {
+            grub_timeout_style = "menu".to_string();
         }
         
         Ok(GrubConfig {
             grub_default,
             grub_cmdline_linux,
             grub_cmdline_linux_default,
+            grub_timeout,
+            grub_timeout_style,
         })
     }
     
@@ -50,9 +70,13 @@ impl GrubConfig {
         let default_re = Regex::new(r#"^\s*GRUB_DEFAULT\s*="#).unwrap();
         let cmdline_linux_re = Regex::new(r#"^\s*GRUB_CMDLINE_LINUX\s*="#).unwrap();
         let cmdline_linux_default_re = Regex::new(r#"^\s*GRUB_CMDLINE_LINUX_DEFAULT\s*="#).unwrap();
+        let timeout_re = Regex::new(r#"^\s*GRUB_TIMEOUT\s*="#).unwrap();
+        let timeout_style_re = Regex::new(r#"^\s*GRUB_TIMEOUT_STYLE\s*="#).unwrap();
         
         let mut found_cmdline_linux = false;
         let mut found_cmdline_linux_default = false;
+        let mut found_timeout = false;
+        let mut found_timeout_style = false;
         
         for line in &mut lines {
             if default_re.is_match(line) {
@@ -63,6 +87,12 @@ impl GrubConfig {
             } else if cmdline_linux_default_re.is_match(line) {
                 *line = format!("GRUB_CMDLINE_LINUX_DEFAULT=\"{}\"", self.grub_cmdline_linux_default);
                 found_cmdline_linux_default = true;
+            } else if timeout_re.is_match(line) {
+                *line = format!("GRUB_TIMEOUT={}", self.grub_timeout);
+                found_timeout = true;
+            } else if timeout_style_re.is_match(line) {
+                *line = format!("GRUB_TIMEOUT_STYLE={}", self.grub_timeout_style);
+                found_timeout_style = true;
             }
         }
         
@@ -72,6 +102,12 @@ impl GrubConfig {
         }
         if !found_cmdline_linux_default {
             lines.push(format!("GRUB_CMDLINE_LINUX_DEFAULT=\"{}\"", self.grub_cmdline_linux_default));
+        }
+        if !found_timeout {
+            lines.push(format!("GRUB_TIMEOUT={}", self.grub_timeout));
+        }
+        if !found_timeout_style {
+            lines.push(format!("GRUB_TIMEOUT_STYLE={}", self.grub_timeout_style));
         }
         
         let new_content = lines.join("\n") + "\n";
@@ -329,6 +365,263 @@ pub fn edit_kernel_parameters(bcolors: &colorprint::Bcolors) -> bool {
                         println!();
                         println!("{}Please run the following command to apply changes:{}",
                                 bcolors.warning(), bcolors.endc());
+                        println!("  {}{}{}", bcolors.bold(), "sudo update-grub", bcolors.endc());
+                        println!();
+                        println!("Press Enter to continue...");
+                        let _ = io::stdin().read_line(&mut String::new());
+                        return true;
+                    }
+                    Err(e) => {
+                        println!();
+                        println!("{}Error saving configuration: {}{}", 
+                                bcolors.fail(""), e, bcolors.endc());
+                        println!();
+                        println!("Press Enter to continue...");
+                        let _ = io::stdin().read_line(&mut String::new());
+                    }
+                }
+            }
+            "4" => {
+                return false;
+            }
+            _ => {
+                continue;
+            }
+        }
+    }
+}
+
+// Function 1: Set default boot entry (permanent)
+pub fn set_default_entry_interactive(entry: &crate::grub::Entry, bcolors: &colorprint::Bcolors) -> bool {
+    use std::io::{self, Write};
+    
+    print!("\x1b[2J\x1b[H"); // clear screen
+    println!("{}", bcolors.okgreen("╔═══════════════════════════════════════════════════╗"));
+    println!("{}", bcolors.okgreen("║     Set Default Boot Entry (Permanent)           ║"));
+    println!("{}", bcolors.okgreen("╚═══════════════════════════════════════════════════╝"));
+    println!();
+    println!("{}Please select the boot entry you want to set as default.{}", 
+            bcolors.bold(), bcolors.endc());
+    println!("{}Navigate to the entry and press Enter to select it.{}", 
+            bcolors.okblue(""), bcolors.endc());
+    println!();
+    println!("Press Enter to continue...");
+    let _ = io::stdin().read_line(&mut String::new());
+    false // Return false to continue menu navigation
+}
+
+pub fn set_default_entry(entry: &crate::grub::Entry, path: &[usize], bcolors: &colorprint::Bcolors) -> bool {
+    use std::io::{self, Write};
+    
+    let p_str: String = path.iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<_>>()
+        .join(">");
+    
+    let entry_ref = crate::grub::get_entry(entry, path);
+    
+    println!();
+    println!("{}Set '{}' as permanent default boot entry?{}", 
+            bcolors.bold(), 
+            entry_ref.name,
+            bcolors.endc());
+    println!("{}Path: {}{}", bcolors.okblue(""), p_str, bcolors.endc());
+    println!();
+    print!("{}Confirm [Y/n]: {}", bcolors.bold(), bcolors.endc());
+    io::stdout().flush().unwrap();
+    
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input).is_ok() {
+        let answer = input.trim().to_lowercase();
+        if answer == "y" || answer == "yes" || answer.is_empty() {
+            let mut config = match GrubConfig::load() {
+                Ok(c) => c,
+                Err(e) => {
+                    println!("{}Error loading config: {}{}", bcolors.fail(""), e, bcolors.endc());
+                    println!("\nPress Enter to continue...");
+                    let _ = io::stdin().read_line(&mut String::new());
+                    return false;
+                }
+            };
+            
+            config.grub_default = format!("\"{}\"", p_str);
+            
+            match config.save() {
+                Ok(_) => {
+                    println!();
+                    println!("{}Default boot entry set successfully!{}", 
+                            bcolors.okgreen(""), bcolors.endc());
+                    println!();
+                    println!("{}Please run: {}{}", 
+                            bcolors.warning(), 
+                            bcolors.bold(),
+                            bcolors.endc());
+                    println!("  {}{}{}", bcolors.bold(), "sudo update-grub", bcolors.endc());
+                    println!();
+                    println!("Press Enter to continue...");
+                    let _ = io::stdin().read_line(&mut String::new());
+                    return true;
+                }
+                Err(e) => {
+                    println!();
+                    println!("{}Error saving configuration: {}{}", 
+                            bcolors.fail(""), e, bcolors.endc());
+                    println!();
+                    println!("Press Enter to continue...");
+                    let _ = io::stdin().read_line(&mut String::new());
+                    return false;
+                }
+            }
+        }
+    }
+    false
+}
+
+// Function 2: View current default boot entry
+pub fn view_default_entry(entry: &crate::grub::Entry, bcolors: &colorprint::Bcolors) {
+    use std::io::{self, Write};
+    
+    let config = match GrubConfig::load() {
+        Ok(c) => c,
+        Err(e) => {
+            println!("{}Error loading config: {}{}", bcolors.fail(""), e, bcolors.endc());
+            println!("\nPress Enter to continue...");
+            let _ = io::stdin().read_line(&mut String::new());
+            return;
+        }
+    };
+    
+    print!("\x1b[2J\x1b[H"); // clear screen
+    println!("{}", bcolors.okgreen("╔═══════════════════════════════════════════════════╗"));
+    println!("{}", bcolors.okgreen("║     Current Default Boot Entry                    ║"));
+    println!("{}", bcolors.okgreen("╚═══════════════════════════════════════════════════╝"));
+    println!();
+    
+    if config.grub_default == "saved" {
+        println!("{}Current setting: {}{}", 
+                bcolors.bold(), 
+                bcolors.okgreen("GRUB_DEFAULT=saved"),
+                bcolors.endc());
+        println!();
+        println!("This means the last selected entry will be used.");
+    } else {
+        println!("{}Current setting: GRUB_DEFAULT={}{}", 
+                bcolors.bold(), 
+                bcolors.okblue(&config.grub_default),
+                bcolors.endc());
+        println!();
+        
+        // Try to find and display the entry name
+        let path_str = config.grub_default.trim_matches('"').trim_matches('\'');
+        let path: Result<Vec<usize>, _> = path_str.split('>')
+            .map(|s| s.parse::<usize>())
+            .collect();
+        
+        if let Ok(path_vec) = path {
+            if let Some(entry_ref) = crate::grub::try_get_entry(entry, &path_vec) {
+                println!("{}Entry name: {}{}", 
+                        bcolors.bold(),
+                        bcolors.okgreen(&entry_ref.name),
+                        bcolors.endc());
+            } else {
+                println!("{}Warning: Could not find entry at path '{}'{}", 
+                        bcolors.warning(),
+                        path_str,
+                        bcolors.endc());
+            }
+        }
+    }
+    
+    println!();
+    println!("Press Enter to continue...");
+    let _ = io::stdin().read_line(&mut String::new());
+}
+
+// Function 3: Configure GRUB timeout
+pub fn configure_timeout(bcolors: &colorprint::Bcolors) -> bool {
+    use std::io::{self, Write};
+    
+    let mut config = match GrubConfig::load() {
+        Ok(c) => c,
+        Err(e) => {
+            println!("{}Error loading config: {}{}", bcolors.fail(""), e, bcolors.endc());
+            println!("\nPress Enter to continue...");
+            let _ = io::stdin().read_line(&mut String::new());
+            return false;
+        }
+    };
+    
+    loop {
+        print!("\x1b[2J\x1b[H"); // clear screen
+        println!("{}", bcolors.okgreen("╔═══════════════════════════════════════════════════╗"));
+        println!("{}", bcolors.okgreen("║     Configure GRUB Timeout                        ║"));
+        println!("{}", bcolors.okgreen("╚═══════════════════════════════════════════════════╝"));
+        println!();
+        
+        println!("{}Current settings:{}", bcolors.bold(), bcolors.endc());
+        println!("  GRUB_TIMEOUT: {}", bcolors.okblue(&config.grub_timeout));
+        println!("  GRUB_TIMEOUT_STYLE: {}", bcolors.okblue(&config.grub_timeout_style));
+        println!();
+        
+        println!("{}Options:{}", bcolors.bold(), bcolors.endc());
+        println!("  1. Set timeout (seconds, -1 for no timeout)");
+        println!("  2. Set timeout style (menu/hidden/countdown)");
+        println!("  3. Save and exit");
+        println!("  4. Cancel");
+        println!();
+        print!("{}Select option [1-4]: {}", bcolors.bold(), bcolors.endc());
+        io::stdout().flush().unwrap();
+        
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            continue;
+        }
+        
+        match input.trim() {
+            "1" => {
+                print!("{}Enter timeout in seconds (current: {}, -1 for no timeout): {}", 
+                       bcolors.bold(),
+                       bcolors.okblue(&config.grub_timeout),
+                       bcolors.endc());
+                io::stdout().flush().unwrap();
+                let mut new_timeout = String::new();
+                if io::stdin().read_line(&mut new_timeout).is_ok() {
+                    let trimmed = new_timeout.trim();
+                    if !trimmed.is_empty() {
+                        config.grub_timeout = trimmed.to_string();
+                    }
+                }
+            }
+            "2" => {
+                println!("{}Timeout style options:{}", bcolors.bold(), bcolors.endc());
+                println!("  menu - Show menu");
+                println!("  hidden - Hide menu");
+                println!("  countdown - Show countdown");
+                println!();
+                print!("{}Enter timeout style (current: {}): {}", 
+                       bcolors.bold(),
+                       bcolors.okblue(&config.grub_timeout_style),
+                       bcolors.endc());
+                io::stdout().flush().unwrap();
+                let mut new_style = String::new();
+                if io::stdin().read_line(&mut new_style).is_ok() {
+                    let trimmed = new_style.trim();
+                    if !trimmed.is_empty() {
+                        config.grub_timeout_style = trimmed.to_string();
+                    }
+                }
+            }
+            "3" => {
+                match config.save() {
+                    Ok(_) => {
+                        println!();
+                        println!("{}Configuration saved successfully!{}", 
+                                bcolors.okgreen(""), bcolors.endc());
+                        println!();
+                        println!("{}Please run: {}{}", 
+                                bcolors.warning(), 
+                                bcolors.bold(),
+                                bcolors.endc());
                         println!("  {}{}{}", bcolors.bold(), "sudo update-grub", bcolors.endc());
                         println!();
                         println!("Press Enter to continue...");
