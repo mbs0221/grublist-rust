@@ -204,6 +204,7 @@ impl App {
                     AppState::RenameBootEntry { .. } => (12, 0),
                     AppState::BackupManager { selected, .. } => (13, *selected),
                     AppState::ValidateGrub { .. } => (14, 0),
+                    AppState::BootTimeStats { selected, .. } => (15, *selected),
                 };
 
                 match state_snapshot.0 {
