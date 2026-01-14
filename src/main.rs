@@ -149,8 +149,19 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
                 }
                 _ => {
                     // Add character to search query (if printable)
-                    if k >= 32 && k <= 126 {
-                        search_query.push(k as char);
+                    // Handle special key codes that were mapped to single characters
+                    let char_to_add = match k {
+                        6 => Some('q'),  // q key
+                        7 => Some('y'),  // y key
+                        8 => Some('n'),  // n key
+                        47 => Some('/'), // / key
+                        100 => Some('d'), // d key
+                        _ if k >= 32 && k <= 126 => Some(k as char),
+                        _ => None,
+                    };
+                    
+                    if let Some(c) = char_to_add {
+                        search_query.push(c);
                         // Recalculate search results
                         search_results = collect_all_matches(&entry, &search_query);
                         if !search_results.is_empty() {
@@ -643,8 +654,19 @@ fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
                 }
                 _ => {
                     // Add character to search query (if printable)
-                    if k >= 32 && k <= 126 {
-                        search_query.push(k as char);
+                    // Handle special key codes that were mapped to single characters
+                    let char_to_add = match k {
+                        6 => Some('q'),  // q key
+                        7 => Some('y'),  // y key
+                        8 => Some('n'),  // n key
+                        47 => Some('/'), // / key
+                        100 => Some('d'), // d key
+                        _ if k >= 32 && k <= 126 => Some(k as char),
+                        _ => None,
+                    };
+                    
+                    if let Some(c) = char_to_add {
+                        search_query.push(c);
                         // Recalculate search results
                         search_results = collect_all_matches(&entry, &search_query);
                         if !search_results.is_empty() {
