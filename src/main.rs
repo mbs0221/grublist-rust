@@ -173,8 +173,9 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
             }
             2 => { // Down
                 if let Some(p) = path.pop() {
-                    // Only config options available at root level (4 options: 0-3)
-                    let max_idx = 3;
+                    // Only config options available at root level
+                    let config_idx = entry.children.len();
+                    let max_idx = config_idx + 3; // kernel params, view default, set default, timeout
                     let new_p = (p + 1).min(max_idx);
                     path.push(new_p);
                 }
