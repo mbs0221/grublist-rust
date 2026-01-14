@@ -7,7 +7,7 @@ description = "A Rust implementation of grub selection tool with interactive men
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/mbs0221/grublist-rust"
 keywords = ["grub", "boot", "kernel", "menu", "interactive"]
-categories = ["command-line-utilities", "system"]
+categories = ["command-line-utilities"]
 readme = "README.md"
 
 [[bin]]
