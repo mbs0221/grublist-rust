@@ -1,6 +1,7 @@
 mod colorprint;
 mod interaction;
 mod grub;
+mod grub_config;
 
 use colorprint::Bcolors;
 use interaction::get_key_input;
@@ -65,12 +66,19 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
             2 => { // Down
                 if let Some(p) = path.pop() {
                     let entry_ref = get_entry(&entry, &path);
-                    let max_idx = entry_ref.children.len().saturating_sub(1);
+                    // Include config option in max index
+                    let max_idx = entry_ref.children.len();
                     let new_p = (p + 1).min(max_idx);
                     path.push(new_p);
                 }
             }
             3 | 5 => { // Right & Enter
+                // Check if config option is selected
+                if path.len() == 1 && path[0] == entry.children.len() {
+                    grub_config::edit_kernel_parameters(bcolors);
+                    continue;
+                }
+                
                 let entry_ref = get_entry(&entry, &path);
                 if entry_ref.entry_type == EntryType::Submenu {
                     path.push(0);
@@ -123,6 +131,24 @@ fn print_entry(root: &Entry, path: &[usize], level: usize, bcolors: &Bcolors) {
                 EntryType::Root => String::new(),
             };
             println!("{}{}{}", indent, tag, child.name);
+        }
+    }
+    
+    // Add configuration option at root level
+    if level == 0 {
+        let config_selected = path.len() == 1 && path[0] == root.children.len();
+        let indent = " ".repeat(4 * level);
+        let config_tag = format!("[{}⚙] ", bcolors.okblue("⚙"));
+        
+        if config_selected {
+            println!("{}{}{}{}{}", 
+                indent,
+                config_tag,
+                bcolors.inverse("Configure Kernel Parameters"),
+                bcolors.endc(),
+                "");
+        } else {
+            println!("{}{}{}", indent, config_tag, "Configure Kernel Parameters");
         }
     }
 }
