@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2024-12-XX
+
+### Added
+- **Ratatui Framework**: Complete refactor to use ratatui (formerly tui-rs) for modern TUI experience
+- **Mouse Support**: Click on menu items to select them
+- **Right Key Support**: Use Right arrow key for continuous editing in parameter and timeout configuration menus
+- **Circular Scrolling**: Up/Down navigation now wraps around in all menus
+- **Left Key Navigation**: Use Left arrow key to return to previous menu in all configuration screens
+
+### Changed
+- **UI Framework**: Migrated from custom terminal rendering to ratatui framework with crossterm backend
+- **Main Menu**: Now only displays configuration options, boot entries accessed through Set Default Boot Entry submenu
+- **Exit Behavior**: Unified to use ESC key consistently across all menus
+- **Search Integration**: Search functionality integrated into Set Default Boot Entry menu
+- **Search Initiation**: Any letter or number key can start search mode
+
+### Fixed
+- Fixed navigation issues in SelectBootEntry when path is empty
+- Fixed menu selection for ConfigureKernelParams and EditParameterList states
+- Fixed various UI rendering issues with ratatui integration
+- Fixed circular scrolling implementation for all menus
+
 ## [0.1.4] - 2024-12-XX
 
 ### Added

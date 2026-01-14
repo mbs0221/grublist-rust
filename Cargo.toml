@@ -1,6 +1,6 @@
 [package]
 name = "grublist"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Benshan Mei <mbs2021@163.com>"]
 description = "A Rust implementation of grub selection tool with interactive menu interface"
