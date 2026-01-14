@@ -31,7 +31,7 @@ fn print_banner(bcolors: &Bcolors) {
     println!("{}", bcolors.okgreen(&format!(r#"
     ╔═══════════════════════════════════════════════════╗
     ║                                                   ║
-    ║            {}GRUBLIST{} v0.1.0                        ║
+    ║            {}GRUBLIST{} v0.1.4                        ║
     ║                                                   ║
     ║     Interactive GRUB Boot Menu Selector           ║
     ║                                                   ║
