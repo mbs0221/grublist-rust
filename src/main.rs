@@ -1388,7 +1388,7 @@ impl App {
             Line::from("║                                                   ║"),
             Line::from(vec![
                 Span::styled("            GRUBLIST", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-                Span::raw(" v0.1.5                        "),
+                Span::raw(" v0.2.0                        "),
             ]),
             Line::from("║                                                   ║"),
             Line::from("║     Interactive GRUB Boot Menu Selector           ║"),
