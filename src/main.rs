@@ -37,7 +37,7 @@ fn print_banner(bcolors: &Bcolors) {
     ║                                                   ║
     ╚═══════════════════════════════════════════════════╝
     "#, bold, endc)));
-    println!("{}Controls: ↑↓ Navigate  →/Enter Select  ← Back  q Quit{}\n", 
+    println!("{}Controls: ↑↓ Navigate  →/Enter Select  ← Back  / Search  d Set Default  q Quit{}\n", 
              bcolors.okblue(""), bcolors.endc());
 }
 
