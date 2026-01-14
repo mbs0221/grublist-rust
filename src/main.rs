@@ -489,6 +489,10 @@ fn print_entry_only(root: &Entry, path: &[usize], level: usize, bcolors: &Bcolor
 fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
     let mut path = vec![0];
     let mut in_selection_mode = true;
+    let mut search_mode = false;
+    let mut search_query = String::new();
+    let mut search_results: Vec<Vec<usize>> = Vec::new();
+    let mut search_result_index = 0;
     
     print!("\x1b[2J\x1b[H"); // clear screen
     
@@ -498,12 +502,50 @@ fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
         println!("{}", bcolors.okgreen("║     Select Boot Entry to Set as Default          ║"));
         println!("{}", bcolors.okgreen("╚═══════════════════════════════════════════════════╝"));
         println!();
-        println!("{}Navigate to the boot entry and press Enter to select{}", 
-                bcolors.okblue(""), bcolors.endc());
-        println!("{}Press ← or q to cancel{}", bcolors.okblue(""), bcolors.endc());
-        println!();
         
-        print_entry_only(&entry, &path, 0, bcolors);
+        if search_mode {
+            println!("{}Search: {}{}", bcolors.okblue(""), search_query, bcolors.endc());
+            println!("{}Press ESC to cancel search, ↑↓ to navigate, Enter to select{}", 
+                    bcolors.okblue(""), bcolors.endc());
+            println!();
+            
+            if search_results.is_empty() {
+                println!("{}No matches found{}", bcolors.fail(""), bcolors.endc());
+            } else {
+                println!("{}Search Results ({} found):{}", 
+                        bcolors.okgreen(""), search_results.len(), bcolors.endc());
+                println!();
+                
+                for (idx, result_path) in search_results.iter().enumerate() {
+                    let entry_ref = get_entry(&entry, result_path);
+                    let is_selected = idx == search_result_index;
+                    
+                    let tag = match entry_ref.entry_type {
+                        EntryType::Submenu => format!("[{}+] ", bcolors.fail("+")),
+                        EntryType::MenuEntry => format!("[{}●] ", bcolors.okgreen("●")),
+                        EntryType::Root => String::new(),
+                    };
+                    
+                    if is_selected {
+                        println!("  {}{}{}{}{}", 
+                            tag,
+                            bcolors.inverse(&entry_ref.name),
+                            bcolors.endc(),
+                            "",
+                            "");
+                    } else {
+                        println!("  {}{}", tag, entry_ref.name);
+                    }
+                }
+            }
+        } else {
+            println!("{}Navigate to the boot entry and press Enter to select{}", 
+                    bcolors.okblue(""), bcolors.endc());
+            println!("{}Press / to search, ← or q to cancel{}", bcolors.okblue(""), bcolors.endc());
+            println!();
+            
+            print_entry_only(&entry, &path, 0, bcolors);
+        }
         
         let k = loop {
             match get_key_input() {
@@ -511,6 +553,60 @@ fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
                 key => break key,
             }
         };
+        
+        if search_mode {
+            match k {
+                27 => { // ESC - exit search mode
+                    search_mode = false;
+                    search_query.clear();
+                    search_results.clear();
+                    search_result_index = 0;
+                }
+                127 => { // Backspace
+                    search_query.pop();
+                    // Recalculate search results
+                    search_results = collect_all_matches(&entry, &search_query);
+                    if !search_results.is_empty() {
+                        search_result_index = 0.min(search_results.len() - 1);
+                    } else {
+                        search_result_index = 0;
+                    }
+                }
+                1 => { // Up - navigate to previous match
+                    if !search_results.is_empty() {
+                        if search_result_index > 0 {
+                            search_result_index -= 1;
+                        } else {
+                            search_result_index = search_results.len() - 1; // Wrap around
+                        }
+                    }
+                }
+                2 => { // Down - navigate to next match
+                    if !search_results.is_empty() {
+                        search_result_index = (search_result_index + 1) % search_results.len();
+                    }
+                }
+                3 | 5 => { // Right & Enter - select current search result
+                    if !search_results.is_empty() && search_result_index < search_results.len() {
+                        return Some(search_results[search_result_index].clone());
+                    }
+                }
+                _ => {
+                    // Add character to search query (if printable)
+                    if k >= 32 && k <= 126 {
+                        search_query.push(k as char);
+                        // Recalculate search results
+                        search_results = collect_all_matches(&entry, &search_query);
+                        if !search_results.is_empty() {
+                            search_result_index = 0;
+                        } else {
+                            search_result_index = 0;
+                        }
+                    }
+                }
+            }
+            continue;
+        }
         
         match k {
             1 => { // Up
@@ -543,6 +639,12 @@ fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
                     // Exit selection mode
                     return None;
                 }
+            }
+            47 => { // / - start search
+                search_mode = true;
+                search_query.clear();
+                search_results = collect_all_matches(&entry, &search_query);
+                search_result_index = 0;
             }
             6 => { // q - quit
                 return None;
