@@ -6,6 +6,7 @@ mod kernel_cleanup;
 mod custom_names;
 mod backup_manager;
 mod grub_validate;
+mod boot_time;
 
 use grub::{Entry, EntryType, load_grub, get_entry, try_get_entry};
 use ratatui::{
@@ -129,6 +130,10 @@ enum AppState {
     },
     ValidateGrub {
         result: Option<grub_validate::ValidationResult>,
+    },
+    BootTimeStats {
+        entries: Vec<boot_time::BootTimeEntry>,
+        selected: usize,
     },
 }
 
