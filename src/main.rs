@@ -1406,7 +1406,6 @@ impl App {
                     ListItem::new("👁 View Default Boot Entry"),
                     ListItem::new("ℹ️  View Kernel Info"),
                     ListItem::new("🧹 Cleanup Old Kernels"),
-                    ListItem::new("✏️  Rename Boot Entry"),
                     ListItem::new("💾 Backup Manager"),
                     ListItem::new("✓ Validate GRUB Config"),
                 ]
