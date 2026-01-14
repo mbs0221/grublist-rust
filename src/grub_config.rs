@@ -102,6 +102,24 @@ fn join_parameters(params: &[String]) -> String {
 
 use crate::colorprint;
 
+fn split_parameter(param: &str) -> (String, Option<String>) {
+    if let Some(pos) = param.find('=') {
+        let name = param[..pos].to_string();
+        let value = param[pos + 1..].to_string();
+        (name, Some(value))
+    } else {
+        (param.to_string(), None)
+    }
+}
+
+fn format_parameter(name: &str, value: Option<&str>) -> String {
+    if let Some(val) = value {
+        format!("{}={}", name, val)
+    } else {
+        name.to_string()
+    }
+}
+
 fn edit_parameter_list(title: &str, params: &mut Vec<String>, bcolors: &colorprint::Bcolors) -> bool {
     use std::io::{self, Write};
     
@@ -118,13 +136,23 @@ fn edit_parameter_list(title: &str, params: &mut Vec<String>, bcolors: &colorpri
         } else {
             println!("{}Parameters:{}", bcolors.bold(), bcolors.endc());
             for (i, param) in params.iter().enumerate() {
-                println!("  {}. {}", i + 1, bcolors.okblue(param));
+                let (name, value) = split_parameter(param);
+                if let Some(val) = value {
+                    println!("  {}. {}={}", 
+                            i + 1, 
+                            bcolors.okblue(&name),
+                            bcolors.okgreen(&val));
+                } else {
+                    println!("  {}. {}", i + 1, bcolors.okblue(&name));
+                }
             }
             println!();
         }
         
         println!("{}Options:{}", bcolors.bold(), bcolors.endc());
-        println!("  1-{}. Edit parameter", params.len());
+        if !params.is_empty() {
+            println!("  1-{}. Edit parameter value", params.len());
+        }
         println!("  a. Add new parameter");
         if !params.is_empty() {
             println!("  d. Delete parameter");
@@ -144,28 +172,68 @@ fn edit_parameter_list(title: &str, params: &mut Vec<String>, bcolors: &colorpri
         
         if let Ok(idx) = choice.parse::<usize>() {
             if idx >= 1 && idx <= params.len() {
-                print!("{}Enter new value for parameter {} (current: {}): {}", 
-                       bcolors.bold(),
-                       idx,
-                       bcolors.okblue(&params[idx - 1]),
-                       bcolors.endc());
+                let (name, current_value) = split_parameter(&params[idx - 1]);
+                let has_value = current_value.is_some();
+                
+                if let Some(ref val) = current_value {
+                    // Parameter has a value, edit only the value
+                    print!("{}Enter new value for {} (current: {}): {}", 
+                           bcolors.bold(),
+                           bcolors.okblue(&name),
+                           bcolors.okgreen(val),
+                           bcolors.endc());
+                } else {
+                    // Parameter has no value, allow adding value or editing name
+                    print!("{}Enter value for {} (or leave empty to edit name): {}", 
+                           bcolors.bold(),
+                           bcolors.okblue(&name),
+                           bcolors.endc());
+                }
                 io::stdout().flush().unwrap();
                 let mut new_value = String::new();
                 if io::stdin().read_line(&mut new_value).is_ok() {
                     let trimmed = new_value.trim();
-                    if !trimmed.is_empty() {
-                        params[idx - 1] = trimmed.to_string();
+                    if trimmed.is_empty() {
+                        // If empty and parameter has no value, allow editing the name
+                        if !has_value {
+                            print!("{}Enter new parameter name (current: {}): {}", 
+                                   bcolors.bold(),
+                                   bcolors.okblue(&name),
+                                   bcolors.endc());
+                            io::stdout().flush().unwrap();
+                            let mut new_name = String::new();
+                            if io::stdin().read_line(&mut new_name).is_ok() {
+                                let trimmed_name = new_name.trim();
+                                if !trimmed_name.is_empty() {
+                                    params[idx - 1] = trimmed_name.to_string();
+                                }
+                            }
+                        }
+                    } else {
+                        // Update the value
+                        params[idx - 1] = format_parameter(&name, Some(trimmed));
                     }
                 }
             }
         } else if choice == "a" {
-            print!("{}Enter new parameter: {}", bcolors.bold(), bcolors.endc());
+            print!("{}Enter parameter name: {}", bcolors.bold(), bcolors.endc());
             io::stdout().flush().unwrap();
-            let mut new_param = String::new();
-            if io::stdin().read_line(&mut new_param).is_ok() {
-                let trimmed = new_param.trim();
-                if !trimmed.is_empty() {
-                    params.push(trimmed.to_string());
+            let mut param_name = String::new();
+            if io::stdin().read_line(&mut param_name).is_ok() {
+                let trimmed_name = param_name.trim();
+                if !trimmed_name.is_empty() {
+                    print!("{}Enter parameter value (or leave empty for flag parameter): {}", 
+                           bcolors.bold(), bcolors.endc());
+                    io::stdout().flush().unwrap();
+                    let mut param_value = String::new();
+                    if io::stdin().read_line(&mut param_value).is_ok() {
+                        let trimmed_value = param_value.trim();
+                        if trimmed_value.is_empty() {
+                            params.push(trimmed_name.to_string());
+                        } else {
+                            params.push(format_parameter(trimmed_name, Some(trimmed_value)));
+                        }
+                    }
                 }
             }
         } else if choice == "d" && !params.is_empty() {
