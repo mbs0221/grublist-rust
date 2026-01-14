@@ -37,7 +37,7 @@ fn print_banner(bcolors: &Bcolors) {
     ║                                                   ║
     ╚═══════════════════════════════════════════════════╝
     "#, bold, endc)));
-    println!("{}Controls: ↑↓ Navigate  →/Enter Select  ← Back  / Search  d Set Default  q Quit{}\n", 
+    println!("{}Controls: ↑↓ Navigate  →/Enter Select  ESC Back/Quit  / Search{}\n", 
              bcolors.okblue(""), bcolors.endc());
 }
 
@@ -202,10 +202,8 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
                     }
                 }
             }
-            4 => { // Left
-                if path.len() > 1 {
-                    path.pop();
-                }
+            27 => { // ESC - quit
+                break;
             }
             47 => { // / - start search
                 search_mode = true;
@@ -219,9 +217,6 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
                 if path.len() > 0 {
                     grub_config::set_default_entry(&entry, &path, bcolors);
                 }
-            }
-            6 => { // q
-                break;
             }
             _ => {}
         }
@@ -596,7 +591,7 @@ fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
         } else {
             println!("{}Navigate to the boot entry and press Enter to select{}", 
                     bcolors.okblue(""), bcolors.endc());
-            println!("{}Press / to search, ← or q to cancel{}", bcolors.okblue(""), bcolors.endc());
+            println!("{}Press / to search, ESC to cancel{}", bcolors.okblue(""), bcolors.endc());
             println!();
             
             print_entry_only(&entry, &path, 0, bcolors);
@@ -687,22 +682,19 @@ fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
                     return Some(path.clone());
                 }
             }
-            4 => { // Left
+            4 => { // Left - go back in submenu
                 if path.len() > 1 {
                     path.pop();
-                } else {
-                    // Exit selection mode
-                    return None;
                 }
+            }
+            27 => { // ESC - exit selection mode
+                return None;
             }
             47 => { // / - start search
                 search_mode = true;
                 search_query.clear();
                 search_results = collect_all_matches(&entry, &search_query);
                 search_result_index = 0;
-            }
-            6 => { // q - quit
-                return None;
             }
             _ => {}
         }
