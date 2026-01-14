@@ -24,15 +24,17 @@ fn main() {
 }
 
 fn print_banner(bcolors: &Bcolors) {
-    println!("{}", bcolors.okgreen(r#"
+    let bold = bcolors.bold();
+    let endc = bcolors.endc();
+    println!("{}", bcolors.okgreen(&format!(r#"
     ╔═══════════════════════════════════════════════════╗
     ║                                                   ║
-    ║            {}GRUBLIST{} v0.1.0                      ║
+    ║            {}GRUBLIST{} v0.1.0                        ║
     ║                                                   ║
     ║     Interactive GRUB Boot Menu Selector           ║
     ║                                                   ║
     ╚═══════════════════════════════════════════════════╝
-    "#, bcolors.bold(), bcolors.endc()));
+    "#, bold, endc)));
     println!("{}Controls: ↑↓ Navigate  →/Enter Select  ← Back  q Quit{}\n", 
              bcolors.okblue(""), bcolors.endc());
 }
