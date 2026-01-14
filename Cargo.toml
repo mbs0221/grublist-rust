@@ -2,10 +2,10 @@
 name = "grublist"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Benshan Mei <mbs2021@163.com>"]
 description = "A Rust implementation of grub selection tool with interactive menu interface"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourusername/grublist-rust"
+repository = "https://github.com/mbs0221/grublist-rust"
 keywords = ["grub", "boot", "kernel", "menu", "interactive"]
 categories = ["command-line-utilities", "system"]
 readme = "README.md"
