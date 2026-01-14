@@ -51,12 +51,11 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
         print_banner(bcolors);
         
         if search_mode {
-            println!("{}Search mode (press ESC to cancel): {}{}", 
+            println!("{}Search mode (press ESC to cancel){}", 
                     bcolors.okblue(""), 
-                    bcolors.bold(),
                     bcolors.endc());
-            print!("{}Search: {}{}", bcolors.bold(), search_query, bcolors.endc());
-            io::stdout().flush().unwrap();
+            println!("{}Search: {}{}", bcolors.bold(), search_query, bcolors.endc());
+            println!();
         } else {
             println!();
         }
