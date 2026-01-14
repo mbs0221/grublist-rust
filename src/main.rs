@@ -9,6 +9,9 @@ use grub::{Entry, EntryType, load_grub};
 fn main() {
     let bcolors = Bcolors::new();
     
+    // Show banner
+    print_banner(&bcolors);
+    
     let entry = match load_grub() {
         Some(e) => e,
         None => {
@@ -20,11 +23,27 @@ fn main() {
     menu(entry, &bcolors);
 }
 
+fn print_banner(bcolors: &Bcolors) {
+    println!("{}", bcolors.okgreen(r#"
+    ╔═══════════════════════════════════════════════════╗
+    ║                                                   ║
+    ║            {}GRUBLIST{} v0.1.0                      ║
+    ║                                                   ║
+    ║     Interactive GRUB Boot Menu Selector           ║
+    ║                                                   ║
+    ╚═══════════════════════════════════════════════════╝
+    "#, bcolors.bold(), bcolors.endc()));
+    println!("{}Controls: ↑↓ Navigate  →/Enter Select  ← Back  q Quit{}\n", 
+             bcolors.okblue(""), bcolors.endc());
+}
+
 fn menu(entry: Entry, bcolors: &Bcolors) {
     let mut path = vec![0];
     
     loop {
         print!("\x1b[2J\x1b[H"); // clear screen
+        print_banner(bcolors);
+        println!();
         print_entry(&entry, &path, 0, bcolors);
         
         let k = loop {
