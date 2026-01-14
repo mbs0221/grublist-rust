@@ -1,0 +1,15 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Rust source files
+*.rs text eol=lf
+
+# Cargo files
+Cargo.toml text eol=lf
+Cargo.lock text eol=lf
+
+# Documentation
+*.md text eol=lf
+README* text eol=lf
+LICENSE* text eol=lf
+
