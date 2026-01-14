@@ -188,21 +188,12 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
                     } else if path[0] == config_idx + 1 {
                         grub_config::view_default_entry(&entry, bcolors);
                         continue;
-            } else if path[0] == config_idx + 2 {
-                // Show instructions for setting default entry
-                print!("\x1b[2J\x1b[H"); // clear screen
-                println!("{}", bcolors.okgreen("╔═══════════════════════════════════════════════════╗"));
-                println!("{}", bcolors.okgreen("║     Set Default Boot Entry                        ║"));
-                println!("{}", bcolors.okgreen("╚═══════════════════════════════════════════════════╝"));
-                println!();
-                println!("{}Instructions:{}", bcolors.bold(), bcolors.endc());
-                println!("  1. Navigate to the boot entry you want to set as default");
-                println!("  2. Press '{}d{}' to set it as permanent default", 
-                        bcolors.okblue(""), bcolors.endc());
-                println!();
-                println!("Press Enter to continue...");
-                let _ = io::stdin().read_line(&mut String::new());
-                continue;
+                    } else if path[0] == config_idx + 2 {
+                        // Enter boot entry selection mode for setting default
+                        if let Some(selected_path) = select_boot_entry(&entry, bcolors) {
+                            grub_config::set_default_entry(&entry, &selected_path, bcolors);
+                        }
+                        continue;
                     } else if path[0] == config_idx + 3 {
                         grub_config::configure_timeout(bcolors);
                         continue;
@@ -459,6 +450,74 @@ fn find_previous_match(root: &Entry, current_path: &[usize], query: &str) -> Opt
 }
 
 // get_entry is now in grub module
+
+fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
+    let mut path = vec![0];
+    let mut in_selection_mode = true;
+    
+    print!("\x1b[2J\x1b[H"); // clear screen
+    
+    while in_selection_mode {
+        print!("\x1b[2J\x1b[H"); // clear screen
+        println!("{}", bcolors.okgreen("╔═══════════════════════════════════════════════════╗"));
+        println!("{}", bcolors.okgreen("║     Select Boot Entry to Set as Default          ║"));
+        println!("{}", bcolors.okgreen("╚═══════════════════════════════════════════════════╝"));
+        println!();
+        println!("{}Navigate to the boot entry and press Enter to select{}", 
+                bcolors.okblue(""), bcolors.endc());
+        println!("{}Press ← or q to cancel{}", bcolors.okblue(""), bcolors.endc());
+        println!();
+        
+        print_entry(&entry, &path, 0, bcolors);
+        
+        let k = loop {
+            match get_key_input() {
+                0 => continue,
+                key => break key,
+            }
+        };
+        
+        match k {
+            1 => { // Up
+                if let Some(p) = path.pop() {
+                    let new_p = p.saturating_sub(1);
+                    path.push(new_p);
+                }
+            }
+            2 => { // Down
+                if let Some(p) = path.pop() {
+                    let entry_ref = get_entry(&entry, &path);
+                    let max_idx = entry_ref.children.len().saturating_sub(1);
+                    let new_p = (p + 1).min(max_idx);
+                    path.push(new_p);
+                }
+            }
+            3 | 5 => { // Right & Enter
+                let entry_ref = get_entry(&entry, &path);
+                if entry_ref.entry_type == EntryType::Submenu {
+                    path.push(0);
+                } else {
+                    // Selected a menu entry, return its path
+                    return Some(path.clone());
+                }
+            }
+            4 => { // Left
+                if path.len() > 1 {
+                    path.pop();
+                } else {
+                    // Exit selection mode
+                    return None;
+                }
+            }
+            6 => { // q - quit
+                return None;
+            }
+            _ => {}
+        }
+    }
+    
+    None
+}
 
 fn check_default() -> bool {
     use std::fs::File;
