@@ -311,7 +311,7 @@ impl App {
                                     }
                                 }
                             }
-                            KeyCode::Enter | KeyCode::Right => {
+                            KeyCode::Enter => {
                                 if let AppState::SelectBootEntry { path, selected, action } = &self.state {
                                     let entry_ref = if path.is_empty() {
                                         &self.entry
@@ -333,7 +333,49 @@ impl App {
                                                         kernel_info,
                                                     };
                                                 }
-                                                Some(SelectBootEntryAction::Rename) => {
+                                                None => {
+                                                    // Enter key: confirm set default
+                                                    self.state = AppState::ConfirmSetDefaultEntry {
+                                                        path: result_path,
+                                                        entry_name,
+                                                    };
+                                                }
+                                                _ => {}
+                                            }
+                                        } else if child.entry_type == EntryType::Submenu {
+                                            if let AppState::SelectBootEntry { path: p, selected: s, action: a } = &mut self.state {
+                                                p.push(state_snapshot.1);
+                                                *s = 0;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Right => {
+                                if let AppState::SelectBootEntry { path, selected, action } = &self.state {
+                                    let entry_ref = if path.is_empty() {
+                                        &self.entry
+                                    } else {
+                                        get_entry(&self.entry, path)
+                                    };
+                                    if state_snapshot.1 < entry_ref.children.len() {
+                                        let child = &entry_ref.children[state_snapshot.1];
+                                        if child.entry_type == EntryType::MenuEntry {
+                                            let mut result_path = path.clone();
+                                            result_path.push(state_snapshot.1);
+                                            let entry_name = child.name.clone();
+                                            
+                                            match action {
+                                                Some(SelectBootEntryAction::ViewKernelInfo) => {
+                                                    // Right key also works for ViewKernelInfo
+                                                    let kernel_info = kernel_info::get_kernel_version_from_entry(&entry_name);
+                                                    self.state = AppState::ViewKernelInfo {
+                                                        path: result_path,
+                                                        kernel_info,
+                                                    };
+                                                }
+                                                None => {
+                                                    // Right key: rename boot entry
                                                     let custom_names = custom_names::CustomNames::load();
                                                     let current_name = custom_names.get_custom_name(&result_path)
                                                         .cloned()
@@ -344,12 +386,7 @@ impl App {
                                                         input_buffer: current_name,
                                                     };
                                                 }
-                                                None => {
-                                                    self.state = AppState::ConfirmSetDefaultEntry {
-                                                        path: result_path,
-                                                        entry_name,
-                                                    };
-                                                }
+                                                _ => {}
                                             }
                                         } else if child.entry_type == EntryType::Submenu {
                                             if let AppState::SelectBootEntry { path: p, selected: s, action: a } = &mut self.state {
