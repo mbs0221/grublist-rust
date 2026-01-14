@@ -45,6 +45,8 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
     let mut path = vec![0];
     let mut search_mode = false;
     let mut search_query = String::new();
+    let mut search_results: Vec<Vec<usize>> = Vec::new();
+    let mut search_result_index = 0;
     
     loop {
         print!("\x1b[2J\x1b[H"); // clear screen
@@ -56,13 +58,41 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
                     bcolors.endc());
             println!("{}Search: {}{}", bcolors.bold(), search_query, bcolors.endc());
             println!();
+            
+            // Show search results in a submenu
+            if !search_results.is_empty() {
+                println!("{}Search Results ({} found):{}", 
+                        bcolors.bold(), 
+                        search_results.len(),
+                        bcolors.endc());
+                for (i, result_path) in search_results.iter().enumerate() {
+                    let entry_ref = get_entry(&entry, result_path);
+                    let indent = "    ";
+                    let tag = match entry_ref.entry_type {
+                        EntryType::Submenu => format!("[{}+] ", bcolors.fail("+")),
+                        EntryType::MenuEntry => format!("[{}●] ", bcolors.okgreen("●")),
+                        EntryType::Root => String::new(),
+                    };
+                    
+                    if i == search_result_index {
+                        println!("{}{}{}{}{}", 
+                                indent,
+                                tag,
+                                bcolors.inverse(&entry_ref.name),
+                                bcolors.endc(),
+                                "");
+                    } else {
+                        println!("{}{}{}", indent, tag, entry_ref.name);
+                    }
+                }
+                println!();
+            } else if !search_query.is_empty() {
+                println!("{}No matching entries found.{}", 
+                        bcolors.warning(), bcolors.endc());
+                println!();
+            }
         } else {
             println!();
-        }
-        
-        if search_mode {
-            print_entry_with_search(&entry, &path, 0, bcolors, &search_query);
-        } else {
             print_entry(&entry, &path, 0, bcolors);
         }
         
@@ -78,43 +108,53 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
                 27 => { // ESC - cancel search
                     search_mode = false;
                     search_query.clear();
+                    search_results.clear();
+                    search_result_index = 0;
+                    path = vec![0];
                 }
-                5 => { // Enter - select first match
-                    if let Some(matched_path) = find_first_match(&entry, &search_query) {
-                        path = matched_path;
+                5 => { // Enter - select current match
+                    if !search_results.is_empty() && search_result_index < search_results.len() {
+                        path = search_results[search_result_index].clone();
                         search_mode = false;
                         search_query.clear();
-                    } else if !search_query.is_empty() {
-                        // No match found, show message
-                        print!("\x1b[2J\x1b[H");
-                        println!("{}No matching entry found for '{}'{}", 
-                                bcolors.warning(), search_query, bcolors.endc());
-                        println!("\nPress Enter to continue...");
-                        let _ = io::stdin().read_line(&mut String::new());
-                        search_mode = false;
-                        search_query.clear();
+                        search_results.clear();
+                        search_result_index = 0;
                     }
                 }
                 127 => { // Backspace
                     search_query.pop();
+                    // Recalculate search results
+                    search_results = collect_all_matches(&entry, &search_query);
+                    if !search_results.is_empty() {
+                        search_result_index = 0.min(search_results.len() - 1);
+                    } else {
+                        search_result_index = 0;
+                    }
                 }
                 1 => { // Up - navigate to previous match
-                    if let Some(matched_path) = find_previous_match(&entry, &path, &search_query) {
-                        path = matched_path;
+                    if !search_results.is_empty() {
+                        if search_result_index > 0 {
+                            search_result_index -= 1;
+                        } else {
+                            search_result_index = search_results.len() - 1; // Wrap around
+                        }
                     }
                 }
                 2 => { // Down - navigate to next match
-                    if let Some(matched_path) = find_next_match(&entry, &path, &search_query) {
-                        path = matched_path;
+                    if !search_results.is_empty() {
+                        search_result_index = (search_result_index + 1) % search_results.len();
                     }
                 }
                 _ => {
                     // Add character to search query (if printable)
                     if k >= 32 && k <= 126 {
                         search_query.push(k as char);
-                        // Auto-select first match when typing
-                        if let Some(matched_path) = find_first_match(&entry, &search_query) {
-                            path = matched_path;
+                        // Recalculate search results
+                        search_results = collect_all_matches(&entry, &search_query);
+                        if !search_results.is_empty() {
+                            search_result_index = 0;
+                        } else {
+                            search_result_index = 0;
                         }
                     }
                 }
@@ -300,93 +340,29 @@ fn print_entry(root: &Entry, path: &[usize], level: usize, bcolors: &Bcolors) {
     }
 }
 
-fn print_entry_with_search(root: &Entry, path: &[usize], level: usize, bcolors: &Bcolors, query: &str) {
-    let query_lower = query.to_lowercase();
-    
-    for (i, child) in root.children.iter().enumerate() {
-        let is_selected = level < path.len() && path[level] == i;
-        let matches = query.is_empty() || child.name.to_lowercase().contains(&query_lower);
-        
-        let indent = " ".repeat(4 * level);
-        
-        if matches {
-            if is_selected {
-                let tag = match child.entry_type {
-                    EntryType::Submenu => format!("[{}+] ", bcolors.fail("+")),
-                    EntryType::MenuEntry => format!("[{}●] ", bcolors.okgreen("●")),
-                    EntryType::Root => String::new(),
-                };
-                println!("{}{}{}{}{}", 
-                    indent, 
-                    tag,
-                    bcolors.inverse(&child.name),
-                    bcolors.endc(),
-                    "");
-                
-                if child.entry_type == EntryType::Submenu && level + 1 < path.len() {
-                    print_entry_with_search(child, path, level + 1, bcolors, query);
-                }
-            } else {
-                let tag = match child.entry_type {
-                    EntryType::Submenu => format!("[{}+] ", bcolors.fail("+")),
-                    EntryType::MenuEntry => format!("[{}●] ", bcolors.okgreen("●")),
-                    EntryType::Root => String::new(),
-                };
-                if !query.is_empty() {
-                    // Highlight matching text
-                    println!("{}{}{}{}{}", 
-                            indent, 
-                            tag, 
-                            bcolors.okgreen(&child.name), 
-                            bcolors.endc(), 
-                            "");
-                } else {
-                    println!("{}{}{}", indent, tag, child.name);
-                }
-            }
-        }
-        
-        // Always recurse into submenus to show all matches
-        if child.entry_type == EntryType::Submenu {
-            if level + 1 < path.len() {
-                print_entry_with_search(child, path, level + 1, bcolors, query);
-            } else if matches {
-                // Show submenu children if parent matches
-                print_entry_with_search(child, &[], level + 1, bcolors, query);
-            }
-        }
-    }
-    
-    // Show match count at root level
-    if level == 0 && !query.is_empty() {
-        let match_count = count_matches(root, query);
-        if match_count > 0 {
-            println!();
-            println!("{}Found {} matching entr{}", 
-                    bcolors.okblue(""), 
-                    match_count,
-                    if match_count == 1 { "y" } else { "ies" });
-            println!("{}Use ↑↓ to navigate matches, Enter to select{}", 
-                    bcolors.okblue(""), bcolors.endc());
-        }
-    }
-}
 
-fn count_matches(root: &Entry, query: &str) -> usize {
-    let mut count = 0;
+fn collect_all_matches(root: &Entry, query: &str) -> Vec<Vec<usize>> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    
+    let mut matches = Vec::new();
     let query_lower = query.to_lowercase();
     
-    fn count_recursive(entry: &Entry, query: &str, count: &mut usize) {
-        for child in &entry.children {
+    fn search_recursive(entry: &Entry, query: &str, path: &mut Vec<usize>, matches: &mut Vec<Vec<usize>>) {
+        for (i, child) in entry.children.iter().enumerate() {
+            path.push(i);
             if child.name.to_lowercase().contains(query) {
-                *count += 1;
+                matches.push(path.clone());
             }
-            count_recursive(child, query, count);
+            search_recursive(child, query, path, matches);
+            path.pop();
         }
     }
     
-    count_recursive(root, &query_lower, &mut count);
-    count
+    let mut path = Vec::new();
+    search_recursive(root, &query_lower, &mut path, &mut matches);
+    matches
 }
 
 fn find_first_match(root: &Entry, query: &str) -> Option<Vec<usize>> {
