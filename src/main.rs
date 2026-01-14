@@ -1283,14 +1283,6 @@ impl App {
                 };
             }
             6 => {
-                // Rename Boot Entry - need to show entry selection first
-                self.state = AppState::SelectBootEntry {
-                    path: vec![],
-                    selected: 0,
-                    action: Some(SelectBootEntryAction::Rename),
-                };
-            }
-            7 => {
                 // Backup Manager
                 let backups = backup_manager::list_backups();
                 self.state = AppState::BackupManager {
@@ -1298,7 +1290,7 @@ impl App {
                     selected: 0,
                 };
             }
-            8 => {
+            7 => {
                 // Validate GRUB Config
                 match grub_validate::validate_grub_config() {
                     Ok(result) => {
