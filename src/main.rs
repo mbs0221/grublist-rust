@@ -974,7 +974,14 @@ impl App {
     fn handle_main_menu_action(&mut self, selected: usize) -> io::Result<()> {
         match selected {
             0 => {
-                // Load config and enter kernel parameter configuration
+                // Set Default Boot Entry
+                self.state = AppState::SelectBootEntry {
+                    path: vec![],
+                    selected: 0,
+                };
+            }
+            1 => {
+                // Configure Kernel Parameters
                 match grub_config::GrubConfig::load() {
                     Ok(config) => {
                         let linux_params = grub_config::parse_parameters(&config.grub_cmdline_linux);
@@ -991,16 +998,8 @@ impl App {
                     }
                 }
             }
-            1 => {
-                self.state = AppState::ViewDefaultEntry;
-            }
             2 => {
-                self.state = AppState::SelectBootEntry {
-                    path: vec![],
-                    selected: 0,
-                };
-            }
-            3 => {
+                // Configure GRUB Timeout
                 match grub_config::GrubConfig::load() {
                     Ok(config) => {
                         self.state = AppState::ConfigureTimeout {
@@ -1015,6 +1014,10 @@ impl App {
                         return Ok(());
                     }
                 }
+            }
+            3 => {
+                // View Default Boot Entry
+                self.state = AppState::ViewDefaultEntry;
             }
             _ => {}
         }
@@ -1109,10 +1112,10 @@ impl App {
         match &self.state {
             AppState::MainMenu { selected } => {
                 let items: Vec<ListItem> = vec![
-                    ListItem::new("⚙ Configure Kernel Parameters"),
-                    ListItem::new("👁 View Default Boot Entry"),
                     ListItem::new("⭐ Set Default Boot Entry"),
+                    ListItem::new("⚙ Configure Kernel Parameters"),
                     ListItem::new("⏱ Configure GRUB Timeout"),
+                    ListItem::new("👁 View Default Boot Entry"),
                 ]
                 .into_iter()
                 .map(|item| item.style(Style::default().fg(Color::White)))
