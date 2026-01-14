@@ -216,17 +216,31 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
             27 => { // ESC - quit
                 break;
             }
-            47 => { // / - start search
-                search_mode = true;
-                search_query.clear();
-                // Auto-select first match if available
-                if let Some(matched_path) = find_first_match(&entry, &search_query) {
-                    path = matched_path;
-                }
-            }
-            100 => { // d - set as default
-                if path.len() > 0 {
-                    grub_config::set_default_entry(&entry, &path, bcolors);
+            _ => {
+                // Check if it's a letter, number, or special character that should start search
+                let char_to_add = match k {
+                    6 => Some('q'),  // q key
+                    7 => Some('y'),  // y key
+                    8 => Some('n'),  // n key
+                    47 => Some('/'), // / key
+                    100 => Some('d'), // d key
+                    _ if k >= 48 && k <= 57 => Some(k as char), // 0-9
+                    _ if k >= 65 && k <= 90 => Some(k as char), // A-Z
+                    _ if k >= 97 && k <= 122 => Some(k as char), // a-z
+                    _ => None,
+                };
+                
+                if let Some(c) = char_to_add {
+                    // Start search mode with this character
+                    search_mode = true;
+                    search_query.clear();
+                    search_query.push(c);
+                    search_results = collect_all_matches(&entry, &search_query);
+                    if !search_results.is_empty() {
+                        search_result_index = 0;
+                    } else {
+                        search_result_index = 0;
+                    }
                 }
             }
             _ => {}
@@ -712,11 +726,32 @@ fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
             27 => { // ESC - exit selection mode
                 return None;
             }
-            47 => { // / - start search
-                search_mode = true;
-                search_query.clear();
-                search_results = collect_all_matches(&entry, &search_query);
-                search_result_index = 0;
+            _ => {
+                // Check if it's a letter, number, or special character that should start search
+                let char_to_add = match k {
+                    6 => Some('q'),  // q key
+                    7 => Some('y'),  // y key
+                    8 => Some('n'),  // n key
+                    47 => Some('/'), // / key
+                    100 => Some('d'), // d key
+                    _ if k >= 48 && k <= 57 => Some(k as char), // 0-9
+                    _ if k >= 65 && k <= 90 => Some(k as char), // A-Z
+                    _ if k >= 97 && k <= 122 => Some(k as char), // a-z
+                    _ => None,
+                };
+                
+                if let Some(c) = char_to_add {
+                    // Start search mode with this character
+                    search_mode = true;
+                    search_query.clear();
+                    search_query.push(c);
+                    search_results = collect_all_matches(&entry, &search_query);
+                    if !search_results.is_empty() {
+                        search_result_index = 0;
+                    } else {
+                        search_result_index = 0;
+                    }
+                }
             }
             _ => {}
         }
