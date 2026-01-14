@@ -87,7 +87,107 @@ impl GrubConfig {
     }
 }
 
+fn parse_parameters(cmdline: &str) -> Vec<String> {
+    if cmdline.trim().is_empty() {
+        return Vec::new();
+    }
+    cmdline.split_whitespace()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn join_parameters(params: &[String]) -> String {
+    params.join(" ")
+}
+
 use crate::colorprint;
+
+fn edit_parameter_list(title: &str, params: &mut Vec<String>, bcolors: &colorprint::Bcolors) -> bool {
+    use std::io::{self, Write};
+    
+    loop {
+        print!("\x1b[2J\x1b[H"); // clear screen
+        println!("{}", bcolors.okgreen(&format!("╔═══════════════════════════════════════════════════╗")));
+        println!("{}", bcolors.okgreen(&format!("║     {} ║", format!("{:<45}", title))));
+        println!("{}", bcolors.okgreen("╚═══════════════════════════════════════════════════╝"));
+        println!();
+        
+        if params.is_empty() {
+            println!("{}No parameters configured.{}", bcolors.warning(), bcolors.endc());
+            println!();
+        } else {
+            println!("{}Parameters:{}", bcolors.bold(), bcolors.endc());
+            for (i, param) in params.iter().enumerate() {
+                println!("  {}. {}", i + 1, bcolors.okblue(param));
+            }
+            println!();
+        }
+        
+        println!("{}Options:{}", bcolors.bold(), bcolors.endc());
+        println!("  1-{}. Edit parameter", params.len());
+        println!("  a. Add new parameter");
+        if !params.is_empty() {
+            println!("  d. Delete parameter");
+        }
+        println!("  s. Save and continue");
+        println!("  c. Cancel");
+        println!();
+        print!("{}Select option: {}", bcolors.bold(), bcolors.endc());
+        io::stdout().flush().unwrap();
+        
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            continue;
+        }
+        
+        let choice = input.trim().to_lowercase();
+        
+        if let Ok(idx) = choice.parse::<usize>() {
+            if idx >= 1 && idx <= params.len() {
+                print!("{}Enter new value for parameter {} (current: {}): {}", 
+                       bcolors.bold(),
+                       idx,
+                       bcolors.okblue(&params[idx - 1]),
+                       bcolors.endc());
+                io::stdout().flush().unwrap();
+                let mut new_value = String::new();
+                if io::stdin().read_line(&mut new_value).is_ok() {
+                    let trimmed = new_value.trim();
+                    if !trimmed.is_empty() {
+                        params[idx - 1] = trimmed.to_string();
+                    }
+                }
+            }
+        } else if choice == "a" {
+            print!("{}Enter new parameter: {}", bcolors.bold(), bcolors.endc());
+            io::stdout().flush().unwrap();
+            let mut new_param = String::new();
+            if io::stdin().read_line(&mut new_param).is_ok() {
+                let trimmed = new_param.trim();
+                if !trimmed.is_empty() {
+                    params.push(trimmed.to_string());
+                }
+            }
+        } else if choice == "d" && !params.is_empty() {
+            print!("{}Enter parameter number to delete [1-{}]: ", 
+                   bcolors.bold(), 
+                   params.len());
+            io::stdout().flush().unwrap();
+            let mut del_input = String::new();
+            if io::stdin().read_line(&mut del_input).is_ok() {
+                if let Ok(del_idx) = del_input.trim().parse::<usize>() {
+                    if del_idx >= 1 && del_idx <= params.len() {
+                        params.remove(del_idx - 1);
+                    }
+                }
+            }
+        } else if choice == "s" {
+            return true;
+        } else if choice == "c" {
+            return false;
+        }
+    }
+}
 
 pub fn edit_kernel_parameters(bcolors: &colorprint::Bcolors) -> bool {
     use std::io::{self, Write};
@@ -104,6 +204,9 @@ pub fn edit_kernel_parameters(bcolors: &colorprint::Bcolors) -> bool {
         }
     };
     
+    let mut linux_params = parse_parameters(&config.grub_cmdline_linux);
+    let mut linux_default_params = parse_parameters(&config.grub_cmdline_linux_default);
+    
     loop {
         print!("\x1b[2J\x1b[H"); // clear screen
         println!("{}", bcolors.okgreen("╔═══════════════════════════════════════════════════╗"));
@@ -111,13 +214,19 @@ pub fn edit_kernel_parameters(bcolors: &colorprint::Bcolors) -> bool {
         println!("{}", bcolors.okgreen("╚═══════════════════════════════════════════════════╝"));
         println!();
         
-        println!("{}Current settings:{}", bcolors.bold(), bcolors.endc());
-        println!("  GRUB_CMDLINE_LINUX: {}", bcolors.okblue(&config.grub_cmdline_linux));
-        println!("  GRUB_CMDLINE_LINUX_DEFAULT: {}", bcolors.okblue(&config.grub_cmdline_linux_default));
-        println!();
-        println!("{}Options:{}", bcolors.bold(), bcolors.endc());
-        println!("  1. Edit GRUB_CMDLINE_LINUX");
-        println!("  2. Edit GRUB_CMDLINE_LINUX_DEFAULT");
+        println!("{}Select configuration to edit:{}", bcolors.bold(), bcolors.endc());
+        println!("  1. GRUB_CMDLINE_LINUX ({})", 
+                if linux_params.is_empty() { 
+                    bcolors.warning().to_string() + "empty" + bcolors.endc()
+                } else { 
+                    format!("{} parameters", linux_params.len())
+                });
+        println!("  2. GRUB_CMDLINE_LINUX_DEFAULT ({})", 
+                if linux_default_params.is_empty() { 
+                    bcolors.warning().to_string() + "empty" + bcolors.endc()
+                } else { 
+                    format!("{} parameters", linux_default_params.len())
+                });
         println!("  3. Save and exit");
         println!("  4. Cancel");
         println!();
@@ -131,28 +240,19 @@ pub fn edit_kernel_parameters(bcolors: &colorprint::Bcolors) -> bool {
         
         match input.trim() {
             "1" => {
-                print!("{}Enter GRUB_CMDLINE_LINUX (current: {}): {}", 
-                       bcolors.bold(), 
-                       bcolors.okblue(&config.grub_cmdline_linux),
-                       bcolors.endc());
-                io::stdout().flush().unwrap();
-                let mut new_value = String::new();
-                if io::stdin().read_line(&mut new_value).is_ok() {
-                    config.grub_cmdline_linux = new_value.trim().to_string();
+                if edit_parameter_list("Edit GRUB_CMDLINE_LINUX", &mut linux_params, bcolors) {
+                    config.grub_cmdline_linux = join_parameters(&linux_params);
                 }
             }
             "2" => {
-                print!("{}Enter GRUB_CMDLINE_LINUX_DEFAULT (current: {}): {}", 
-                       bcolors.bold(),
-                       bcolors.okblue(&config.grub_cmdline_linux_default),
-                       bcolors.endc());
-                io::stdout().flush().unwrap();
-                let mut new_value = String::new();
-                if io::stdin().read_line(&mut new_value).is_ok() {
-                    config.grub_cmdline_linux_default = new_value.trim().to_string();
+                if edit_parameter_list("Edit GRUB_CMDLINE_LINUX_DEFAULT", &mut linux_default_params, bcolors) {
+                    config.grub_cmdline_linux_default = join_parameters(&linux_default_params);
                 }
             }
             "3" => {
+                config.grub_cmdline_linux = join_parameters(&linux_params);
+                config.grub_cmdline_linux_default = join_parameters(&linux_default_params);
+                
                 match config.save() {
                     Ok(_) => {
                         println!();
