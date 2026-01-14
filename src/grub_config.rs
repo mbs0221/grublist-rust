@@ -1,9 +1,12 @@
 use std::fs;
 use std::io::{self, BufRead, BufReader};
 use std::fs::File;
+use std::collections::HashMap;
 use regex::Regex;
 
 pub struct GrubConfig {
+    pub params: HashMap<String, String>,
+    // Keep these for backward compatibility
     pub grub_default: String,
     pub grub_cmdline_linux: String,
     pub grub_cmdline_linux_default: String,
@@ -16,43 +19,47 @@ impl GrubConfig {
         let file = File::open("/etc/default/grub")
             .map_err(|_| "Failed to open /etc/default/grub".to_string())?;
         
-        let mut grub_default = String::new();
-        let mut grub_cmdline_linux = String::new();
-        let mut grub_cmdline_linux_default = String::new();
-        let mut grub_timeout = String::new();
-        let mut grub_timeout_style = String::new();
-        
-        let default_re = Regex::new(r#"^\s*GRUB_DEFAULT\s*=\s*(.+)$"#).unwrap();
-        let cmdline_linux_re = Regex::new(r#"^\s*GRUB_CMDLINE_LINUX\s*=\s*(.+)$"#).unwrap();
-        let cmdline_linux_default_re = Regex::new(r#"^\s*GRUB_CMDLINE_LINUX_DEFAULT\s*=\s*(.+)$"#).unwrap();
-        let timeout_re = Regex::new(r#"^\s*GRUB_TIMEOUT\s*=\s*(.+)$"#).unwrap();
-        let timeout_style_re = Regex::new(r#"^\s*GRUB_TIMEOUT_STYLE\s*=\s*(.+)$"#).unwrap();
+        let mut params = HashMap::new();
+        let param_re = Regex::new(r#"^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.+)$"#).unwrap();
         
         for line in BufReader::new(file).lines() {
             let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
+            let line_trimmed = line.trim();
             
-            if let Some(caps) = default_re.captures(&line) {
-                grub_default = caps.get(1).unwrap().as_str().trim_matches('"').trim_matches('\'').to_string();
-            } else if let Some(caps) = cmdline_linux_re.captures(&line) {
-                grub_cmdline_linux = caps.get(1).unwrap().as_str().trim_matches('"').trim_matches('\'').to_string();
-            } else if let Some(caps) = cmdline_linux_default_re.captures(&line) {
-                grub_cmdline_linux_default = caps.get(1).unwrap().as_str().trim_matches('"').trim_matches('\'').to_string();
-            } else if let Some(caps) = timeout_re.captures(&line) {
-                grub_timeout = caps.get(1).unwrap().as_str().trim_matches('"').trim_matches('\'').to_string();
-            } else if let Some(caps) = timeout_style_re.captures(&line) {
-                grub_timeout_style = caps.get(1).unwrap().as_str().trim_matches('"').trim_matches('\'').to_string();
+            // Skip empty lines and comments
+            if line_trimmed.is_empty() || line_trimmed.starts_with('#') {
+                continue;
+            }
+            
+            // Parse all GRUB parameters
+            if let Some(caps) = param_re.captures(&line_trimmed) {
+                let key = caps.get(1).unwrap().as_str().to_string();
+                let mut value = caps.get(2).unwrap().as_str().to_string();
+                
+                // Remove quotes if present
+                value = value.trim_matches('"').trim_matches('\'').trim().to_string();
+                
+                params.insert(key, value);
             }
         }
         
         // Set defaults if not found
-        if grub_timeout.is_empty() {
-            grub_timeout = "5".to_string();
+        if !params.contains_key("GRUB_TIMEOUT") {
+            params.insert("GRUB_TIMEOUT".to_string(), "5".to_string());
         }
-        if grub_timeout_style.is_empty() {
-            grub_timeout_style = "menu".to_string();
+        if !params.contains_key("GRUB_TIMEOUT_STYLE") {
+            params.insert("GRUB_TIMEOUT_STYLE".to_string(), "menu".to_string());
         }
         
+        // Extract commonly used parameters for backward compatibility
+        let grub_default = params.get("GRUB_DEFAULT").cloned().unwrap_or_default();
+        let grub_cmdline_linux = params.get("GRUB_CMDLINE_LINUX").cloned().unwrap_or_default();
+        let grub_cmdline_linux_default = params.get("GRUB_CMDLINE_LINUX_DEFAULT").cloned().unwrap_or_default();
+        let grub_timeout = params.get("GRUB_TIMEOUT").cloned().unwrap_or_else(|| "5".to_string());
+        let grub_timeout_style = params.get("GRUB_TIMEOUT_STYLE").cloned().unwrap_or_else(|| "menu".to_string());
+        
         Ok(GrubConfig {
+            params,
             grub_default,
             grub_cmdline_linux,
             grub_cmdline_linux_default,
@@ -61,53 +68,66 @@ impl GrubConfig {
         })
     }
     
+    pub fn get(&self, key: &str) -> Option<&String> {
+        self.params.get(key)
+    }
+    
+    pub fn set(&mut self, key: &str, value: String) {
+        self.params.insert(key.to_string(), value.clone());
+        
+        // Update backward compatibility fields
+        match key {
+            "GRUB_DEFAULT" => self.grub_default = value,
+            "GRUB_CMDLINE_LINUX" => self.grub_cmdline_linux = value,
+            "GRUB_CMDLINE_LINUX_DEFAULT" => self.grub_cmdline_linux_default = value,
+            "GRUB_TIMEOUT" => self.grub_timeout = value,
+            "GRUB_TIMEOUT_STYLE" => self.grub_timeout_style = value,
+            _ => {}
+        }
+    }
+    
+    pub fn get_all_params(&self) -> &HashMap<String, String> {
+        &self.params
+    }
+    
     pub fn save(&self) -> Result<(), String> {
         let content = fs::read_to_string("/etc/default/grub")
             .map_err(|e| format!("Failed to read /etc/default/grub: {}", e))?;
         
         let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        let param_re = Regex::new(r#"^\s*([A-Z_][A-Z0-9_]*)\s*="#).unwrap();
+        let mut found_params: std::collections::HashSet<String> = std::collections::HashSet::new();
         
-        let default_re = Regex::new(r#"^\s*GRUB_DEFAULT\s*="#).unwrap();
-        let cmdline_linux_re = Regex::new(r#"^\s*GRUB_CMDLINE_LINUX\s*="#).unwrap();
-        let cmdline_linux_default_re = Regex::new(r#"^\s*GRUB_CMDLINE_LINUX_DEFAULT\s*="#).unwrap();
-        let timeout_re = Regex::new(r#"^\s*GRUB_TIMEOUT\s*="#).unwrap();
-        let timeout_style_re = Regex::new(r#"^\s*GRUB_TIMEOUT_STYLE\s*="#).unwrap();
-        
-        let mut found_cmdline_linux = false;
-        let mut found_cmdline_linux_default = false;
-        let mut found_timeout = false;
-        let mut found_timeout_style = false;
-        
+        // Update existing parameters
         for line in &mut lines {
-            if default_re.is_match(line) {
-                *line = format!("GRUB_DEFAULT={}", self.grub_default);
-            } else if cmdline_linux_re.is_match(line) {
-                *line = format!("GRUB_CMDLINE_LINUX=\"{}\"", self.grub_cmdline_linux);
-                found_cmdline_linux = true;
-            } else if cmdline_linux_default_re.is_match(line) {
-                *line = format!("GRUB_CMDLINE_LINUX_DEFAULT=\"{}\"", self.grub_cmdline_linux_default);
-                found_cmdline_linux_default = true;
-            } else if timeout_re.is_match(line) {
-                *line = format!("GRUB_TIMEOUT={}", self.grub_timeout);
-                found_timeout = true;
-            } else if timeout_style_re.is_match(line) {
-                *line = format!("GRUB_TIMEOUT_STYLE={}", self.grub_timeout_style);
-                found_timeout_style = true;
+            let line_trimmed = line.trim();
+            if line_trimmed.is_empty() || line_trimmed.starts_with('#') {
+                continue;
+            }
+            
+            if let Some(caps) = param_re.captures(&line_trimmed) {
+                let key = caps.get(1).unwrap().as_str();
+                if let Some(value) = self.params.get(key) {
+                    found_params.insert(key.to_string());
+                    // Determine if value needs quotes (for CMDLINE parameters)
+                    if key == "GRUB_CMDLINE_LINUX" || key == "GRUB_CMDLINE_LINUX_DEFAULT" {
+                        *line = format!("{}=\"{}\"", key, value);
+                    } else {
+                        *line = format!("{}={}", key, value);
+                    }
+                }
             }
         }
         
-        // Add missing entries if they don't exist
-        if !found_cmdline_linux {
-            lines.push(format!("GRUB_CMDLINE_LINUX=\"{}\"", self.grub_cmdline_linux));
-        }
-        if !found_cmdline_linux_default {
-            lines.push(format!("GRUB_CMDLINE_LINUX_DEFAULT=\"{}\"", self.grub_cmdline_linux_default));
-        }
-        if !found_timeout {
-            lines.push(format!("GRUB_TIMEOUT={}", self.grub_timeout));
-        }
-        if !found_timeout_style {
-            lines.push(format!("GRUB_TIMEOUT_STYLE={}", self.grub_timeout_style));
+        // Add missing parameters at the end
+        for (key, value) in &self.params {
+            if !found_params.contains(key) {
+                if key == "GRUB_CMDLINE_LINUX" || key == "GRUB_CMDLINE_LINUX_DEFAULT" {
+                    lines.push(format!("{}=\"{}\"", key, value));
+                } else {
+                    lines.push(format!("{}={}", key, value));
+                }
+            }
         }
         
         let new_content = lines.join("\n") + "\n";

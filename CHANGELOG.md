@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-01-15
+
+### Added
+- **Boot Time Statistics**: View current and historical boot times with kernel versions
+  - Display boot time for current boot using `systemd-analyze time`
+  - Show historical boot times from `journalctl --list-boots`
+  - Display kernel version for each boot entry
+- **State Stack Navigation**: Implemented navigation history stack for better UX
+  - Return to correct parent menu instead of always going back to main menu
+  - Maintain navigation context when navigating through sub-menus
+- **All GRUB Parameters Configuration**: Extended configuration system to support all `/etc/default/grub` parameters
+  - View and edit any GRUB parameter, not just predefined ones
+  - Dynamic parameter loading and saving
+  - Preserve comments and formatting in configuration file
+
+### Changed
+- **GRUB Settings Consolidation**: Merged "Configure Kernel Parameters" and "Configure GRUB Timeout" into single "Configure GRUB Settings" menu
+  - Unified interface for all GRUB configuration options
+  - Integrated GRUB validation directly into configuration menu
+- **Enhanced Navigation**: Improved menu navigation with state stack
+  - More intuitive back navigation
+  - Better context preservation
+- **Configuration System Refactor**: 
+  - Refactored `GrubConfig` to use `HashMap` for storing all parameters
+  - Backward compatible with existing code
+  - More flexible parameter management
+
+### Technical
+- Added `boot_time` module for boot time statistics
+- Enhanced `grub_config` module with dynamic parameter support
+- Implemented state stack in main application state management
+- Added `EditAllGrubParams` state for comprehensive parameter editing
+
 ## [0.2.0] - 2024-12-XX
 
 ### Added

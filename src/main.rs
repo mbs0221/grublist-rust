@@ -58,12 +58,14 @@ fn main() -> io::Result<()> {
 struct App {
     entry: Entry,
     state: AppState,
+    state_stack: Vec<AppState>,
     search_query: String,
     search_results: Vec<Vec<usize>>,
     search_selected: usize,
     bcolors: colorprint::Bcolors,
 }
 
+#[derive(Clone)]
 enum AppState {
     MainMenu {
         selected: usize,
@@ -82,10 +84,14 @@ enum AppState {
         results: Vec<Vec<usize>>,
         selected: usize,
     },
-    ConfigureKernelParams {
+    ConfigureGrub {
         selected: usize,
         linux_params: Vec<String>,
         linux_default_params: Vec<String>,
+        timeout: String,
+        timeout_style: String,
+        input_mode: GrubConfigInputMode,
+        input_buffer: String,
     },
     EditParameterList {
         title: String,
@@ -95,13 +101,6 @@ enum AppState {
         input_buffer: String,
     },
     ViewDefaultEntry,
-    ConfigureTimeout {
-        selected: usize,
-        timeout: String,
-        timeout_style: String,
-        input_mode: TimeoutInputMode,
-        input_buffer: String,
-    },
     ConfirmSetDefaultEntry {
         path: Vec<usize>,
         entry_name: String,
@@ -135,8 +134,15 @@ enum AppState {
         entries: Vec<boot_time::BootTimeEntry>,
         selected: usize,
     },
+    EditAllGrubParams {
+        params: Vec<(String, String)>,
+        selected: usize,
+        input_mode: GrubConfigInputMode,
+        input_buffer: String,
+    },
 }
 
+#[derive(Clone)]
 enum MessageType {
     Success,
     Error,
@@ -150,10 +156,12 @@ enum SelectBootEntryAction {
 }
 
 #[derive(PartialEq, Clone)]
-enum TimeoutInputMode {
+enum GrubConfigInputMode {
     None,
     EditTimeout,
     SelectTimeoutStyle,
+    EditLinuxParams,
+    EditLinuxDefaultParams,
 }
 
 #[derive(PartialEq)]
@@ -171,10 +179,38 @@ impl App {
         App {
             entry,
             state: AppState::MainMenu { selected: 0 },
+            state_stack: Vec::new(),
             search_query: String::new(),
             search_results: Vec::new(),
             search_selected: 0,
             bcolors: colorprint::Bcolors::new(),
+        }
+    }
+
+    fn push_state(&mut self) {
+        // Push current state to stack (clone it)
+        self.state_stack.push(self.state.clone());
+    }
+
+    fn pop_state(&mut self) -> Option<AppState> {
+        self.state_stack.pop()
+    }
+
+    fn navigate_to(&mut self, new_state: AppState, push_current: bool) {
+        if push_current {
+            self.push_state();
+        }
+        self.state = new_state;
+    }
+
+    fn navigate_back(&mut self) -> bool {
+        if let Some(prev_state) = self.pop_state() {
+            self.state = prev_state;
+            true
+        } else {
+            // If stack is empty, go to main menu
+            self.state = AppState::MainMenu { selected: 0 };
+            false
         }
     }
 
@@ -193,10 +229,9 @@ impl App {
                     AppState::SearchMode { selected } => (1, *selected),
                     AppState::SelectBootEntry { path, selected, .. } => (2, *selected),
                     AppState::SelectBootEntrySearch { path: _, query: _, results: _, selected } => (3, *selected),
-                    AppState::ConfigureKernelParams { selected, .. } => (4, *selected),
+                    AppState::ConfigureGrub { selected, .. } => (4, *selected),
                     AppState::EditParameterList { selected, .. } => (5, *selected),
                     AppState::ViewDefaultEntry => (6, 0),
-                    AppState::ConfigureTimeout { selected, .. } => (7, *selected),
                     AppState::ConfirmSetDefaultEntry { .. } => (8, 0),
                     AppState::Message { .. } => (9, 0),
                     AppState::ViewKernelInfo { .. } => (10, 0),
@@ -205,6 +240,7 @@ impl App {
                     AppState::BackupManager { selected, .. } => (13, *selected),
                     AppState::ValidateGrub { .. } => (14, 0),
                     AppState::BootTimeStats { selected, .. } => (15, *selected),
+                    AppState::EditAllGrubParams { selected, .. } => (16, *selected),
                 };
 
                 match state_snapshot.0 {
@@ -214,7 +250,7 @@ impl App {
                             KeyCode::Up => {
                                 if let AppState::MainMenu { selected } = &mut self.state {
                                     if *selected == 0 {
-                                        *selected = 8;
+                                        *selected = 5;
                                     } else {
                                         *selected -= 1;
                                     }
@@ -222,7 +258,7 @@ impl App {
                             }
                             KeyCode::Down => {
                                 if let AppState::MainMenu { selected } = &mut self.state {
-                                    *selected = (*selected + 1) % 8;
+                                    *selected = (*selected + 1) % 6;
                                 }
                             }
                             KeyCode::Enter | KeyCode::Right => {
@@ -285,7 +321,7 @@ impl App {
                     2 => { // SelectBootEntry
                         match key.code {
                             KeyCode::Esc => {
-                                self.state = AppState::MainMenu { selected: 0 };
+                                self.navigate_back();
                             }
                             KeyCode::Up => {
                                 if let AppState::SelectBootEntry { path, selected, .. } = &mut self.state {
@@ -340,11 +376,12 @@ impl App {
                             KeyCode::Left => {
                                 if let AppState::SelectBootEntry { path, selected, .. } = &mut self.state {
                                     if !path.is_empty() {
+                                        // Go back to parent submenu
                                         path.pop();
                                         *selected = 0;
                                     } else {
-                                        // If at root level, go back to main menu
-                                        self.state = AppState::MainMenu { selected: 0 };
+                                        // If at root level, go back to previous state using stack
+                                        self.navigate_back();
                                     }
                                 }
                             }
@@ -363,10 +400,10 @@ impl App {
                                             result_path.push(state_snapshot.1);
                                             let entry_name = child.name.clone();
                                             let kernel_info = kernel_info::get_kernel_version_from_entry(&entry_name);
-                                            self.state = AppState::ViewKernelInfo {
+                                            self.navigate_to(AppState::ViewKernelInfo {
                                                 path: result_path,
                                                 kernel_info,
-                                            };
+                                            }, true);
                                         }
                                     }
                                 }
@@ -388,10 +425,10 @@ impl App {
                                             
                                             // Only allow if action is None (set default mode)
                                             if action.is_none() {
-                                                self.state = AppState::ConfirmSetDefaultEntry {
+                                                self.navigate_to(AppState::ConfirmSetDefaultEntry {
                                                     path: result_path,
                                                     entry_name,
-                                                };
+                                                }, true);
                                             }
                                         }
                                     }
@@ -418,11 +455,11 @@ impl App {
                                                 let current_name = custom_names.get_custom_name(&result_path)
                                                     .cloned()
                                                     .unwrap_or_else(|| entry_name.clone());
-                                                self.state = AppState::RenameBootEntry {
+                                                self.navigate_to(AppState::RenameBootEntry {
                                                     path: result_path,
                                                     original_name: entry_name,
                                                     input_buffer: current_name,
-                                                };
+                                                }, true);
                                             }
                                         }
                                     }
@@ -443,14 +480,7 @@ impl App {
                     3 => { // SelectBootEntrySearch
                         match key.code {
                             KeyCode::Esc => {
-                                if let AppState::SelectBootEntrySearch { path, .. } = &self.state {
-                                    let path = path.clone();
-                                    self.state = AppState::SelectBootEntry {
-                                        path,
-                                        selected: 0,
-                                        action: None,
-                                    };
-                                }
+                                self.navigate_back();
                             }
                             KeyCode::Up => {
                                 if let AppState::SelectBootEntrySearch { results, selected, .. } = &mut self.state {
@@ -476,10 +506,10 @@ impl App {
                                         let result_path = results[state_snapshot.1].clone();
                                         let entry_ref = get_entry(&self.entry, &result_path);
                                         let entry_name = entry_ref.name.clone();
-                                        self.state = AppState::ConfirmSetDefaultEntry {
+                                        self.navigate_to(AppState::ConfirmSetDefaultEntry {
                                             path: result_path,
                                             entry_name,
-                                        };
+                                        }, true);
                                     }
                                 }
                             }
@@ -515,81 +545,199 @@ impl App {
                             }
                         }
                     }
-                    4 => { // ConfigureKernelParams
+                    4 => { // ConfigureGrub
                         match key.code {
                             KeyCode::Esc | KeyCode::Left => {
-                                self.state = AppState::MainMenu { selected: 0 };
+                                self.navigate_back();
                             }
                             KeyCode::Up => {
-                                if let AppState::ConfigureKernelParams { selected, .. } = &mut self.state {
-                                    if *selected == 0 {
-                                        *selected = 3;
-                                    } else {
-                                        *selected -= 1;
+                                if let AppState::ConfigureGrub { selected, input_mode, .. } = &mut self.state {
+                                    if *input_mode == GrubConfigInputMode::None {
+                                        if *selected == 0 {
+                                            *selected = 7;
+                                        } else {
+                                            *selected -= 1;
+                                        }
                                     }
                                 }
                             }
                             KeyCode::Down => {
-                                if let AppState::ConfigureKernelParams { selected, .. } = &mut self.state {
-                                    *selected = (*selected + 1) % 4;
+                                if let AppState::ConfigureGrub { selected, input_mode, .. } = &mut self.state {
+                                    if *input_mode == GrubConfigInputMode::None {
+                                        *selected = (*selected + 1) % 8;
+                                    }
                                 }
                             }
                             KeyCode::Enter | KeyCode::Right => {
-                                if let AppState::ConfigureKernelParams { selected, linux_params, linux_default_params } = &mut self.state {
-                                    match *selected {
-                                        0 => {
-                                            // Edit GRUB_CMDLINE_LINUX
-                                            let params = linux_params.clone();
-                                            self.state = AppState::EditParameterList {
-                                                title: "Edit GRUB_CMDLINE_LINUX".to_string(),
-                                                params,
-                                                selected: 0,
-                                                input_mode: InputMode::None,
-                                                input_buffer: String::new(),
-                                            };
-                                        }
-                                        1 => {
-                                            // Edit GRUB_CMDLINE_LINUX_DEFAULT
-                                            let params = linux_default_params.clone();
-                                            self.state = AppState::EditParameterList {
-                                                title: "Edit GRUB_CMDLINE_LINUX_DEFAULT".to_string(),
-                                                params,
-                                                selected: 0,
-                                                input_mode: InputMode::None,
-                                                input_buffer: String::new(),
-                                            };
-                                        }
-                                        2 => {
-                                            // Save and exit
-                                            let mut config = match grub_config::GrubConfig::load() {
-                                                Ok(c) => c,
-                                                Err(_) => {
-                                                    self.state = AppState::MainMenu { selected: 0 };
-                                                    continue;
+                                let is_right_key = matches!(key.code, KeyCode::Right);
+                                if let AppState::ConfigureGrub { selected, linux_params, linux_default_params, timeout, timeout_style, input_mode, input_buffer } = &mut self.state {
+                                    let current_input_mode = input_mode.clone();
+                                    match current_input_mode {
+                                        GrubConfigInputMode::None => {
+                                            match *selected {
+                                                0 => {
+                                                    // Edit GRUB_CMDLINE_LINUX
+                                                    let params = linux_params.clone();
+                                                    self.navigate_to(AppState::EditParameterList {
+                                                        title: "Edit GRUB_CMDLINE_LINUX".to_string(),
+                                                        params,
+                                                        selected: 0,
+                                                        input_mode: InputMode::None,
+                                                        input_buffer: String::new(),
+                                                    }, true);
                                                 }
-                                            };
-                                            config.grub_cmdline_linux = grub_config::join_parameters(linux_params);
-                                            config.grub_cmdline_linux_default = grub_config::join_parameters(linux_default_params);
-                                            
-                                            match config.save() {
-                                                Ok(_) => {
-                                                    self.state = AppState::MainMenu { selected: 0 };
+                                                1 => {
+                                                    // Edit GRUB_CMDLINE_LINUX_DEFAULT
+                                                    let params = linux_default_params.clone();
+                                                    self.navigate_to(AppState::EditParameterList {
+                                                        title: "Edit GRUB_CMDLINE_LINUX_DEFAULT".to_string(),
+                                                        params,
+                                                        selected: 0,
+                                                        input_mode: InputMode::None,
+                                                        input_buffer: String::new(),
+                                                    }, true);
                                                 }
-                                                Err(_) => {
-                                                    // TODO: Show error
-                                                    self.state = AppState::MainMenu { selected: 0 };
+                                                2 => {
+                                                    // Edit timeout
+                                                    *input_mode = GrubConfigInputMode::EditTimeout;
+                                                    *input_buffer = timeout.clone();
                                                 }
+                                                3 => {
+                                                    // Edit timeout style
+                                                    *input_mode = GrubConfigInputMode::SelectTimeoutStyle;
+                                                    *input_buffer = String::new();
+                                                }
+                                                4 => {
+                                                    // View/Edit All Parameters
+                                                    match grub_config::GrubConfig::load() {
+                                                        Ok(config) => {
+                                                            let mut params: Vec<(String, String)> = config.get_all_params()
+                                                                .iter()
+                                                                .map(|(k, v)| (k.clone(), v.clone()))
+                                                                .collect();
+                                                            params.sort_by(|a, b| a.0.cmp(&b.0));
+                                                            self.navigate_to(AppState::EditAllGrubParams {
+                                                                params,
+                                                                selected: 0,
+                                                                input_mode: GrubConfigInputMode::None,
+                                                                input_buffer: String::new(),
+                                                            }, true);
+                                                        }
+                                                        Err(e) => {
+                                                            self.state = AppState::Message {
+                                                                title: "Error".to_string(),
+                                                                content: vec![format!("Error loading config: {}", e)],
+                                                                message_type: MessageType::Error,
+                                                            };
+                                                        }
+                                                    }
+                                                }
+                                                5 => {
+                                                    // Validate GRUB Config
+                                                    match grub_validate::validate_grub_config() {
+                                                        Ok(result) => {
+                                                            self.navigate_to(AppState::ValidateGrub {
+                                                                result: Some(result),
+                                                            }, true);
+                                                        }
+                                                        Err(e) => {
+                                                            self.state = AppState::Message {
+                                                                title: "Error".to_string(),
+                                                                content: vec![format!("Failed to validate GRUB config: {}", e)],
+                                                                message_type: MessageType::Error,
+                                                            };
+                                                        }
+                                                    }
+                                                }
+                                                6 => {
+                                                    // Save
+                                                    let mut config = match grub_config::GrubConfig::load() {
+                                                        Ok(c) => c,
+                                                        Err(e) => {
+                                                            self.state = AppState::Message {
+                                                                title: "Error".to_string(),
+                                                                content: vec![format!("Error loading config: {}", e)],
+                                                                message_type: MessageType::Error,
+                                                            };
+                                                            continue;
+                                                        }
+                                                    };
+                                                    config.grub_cmdline_linux = grub_config::join_parameters(linux_params);
+                                                    config.grub_cmdline_linux_default = grub_config::join_parameters(linux_default_params);
+                                                    config.grub_timeout = timeout.clone();
+                                                    config.grub_timeout_style = timeout_style.clone();
+                                                    
+                                                    match config.save() {
+                                                        Ok(_) => {
+                                                            self.state = AppState::Message {
+                                                                title: "Success".to_string(),
+                                                                content: vec![
+                                                                    "Configuration saved successfully!".to_string(),
+                                                                    "".to_string(),
+                                                                    "Please run:".to_string(),
+                                                                    "  sudo update-grub".to_string(),
+                                                                ],
+                                                                message_type: MessageType::Success,
+                                                            };
+                                                        }
+                                                        Err(e) => {
+                                                            self.state = AppState::Message {
+                                                                title: "Error".to_string(),
+                                                                content: vec![format!("Error saving configuration: {}", e)],
+                                                                message_type: MessageType::Error,
+                                                            };
+                                                        }
+                                                    }
+                                                }
+                                                7 => {
+                                                    // Cancel
+                                                    self.navigate_back();
+                                                }
+                                                _ => {}
                                             }
                                         }
-                                        3 => {
-                                            // Cancel
-                                            self.state = AppState::MainMenu { selected: 0 };
+                                        GrubConfigInputMode::EditTimeout => {
+                                            if !input_buffer.trim().is_empty() {
+                                                *timeout = input_buffer.trim().to_string();
+                                            }
+                                            
+                                            if is_right_key {
+                                                *selected = 3;
+                                                *input_mode = GrubConfigInputMode::SelectTimeoutStyle;
+                                                *input_buffer = String::new();
+                                            } else {
+                                                *input_mode = GrubConfigInputMode::None;
+                                                *input_buffer = String::new();
+                                            }
+                                        }
+                                        GrubConfigInputMode::SelectTimeoutStyle => {
+                                            let style = input_buffer.trim().to_lowercase();
+                                            if style == "menu" || style == "hidden" || style == "countdown" {
+                                                *timeout_style = style;
+                                            }
+                                            *input_mode = GrubConfigInputMode::None;
+                                            *input_buffer = String::new();
                                         }
                                         _ => {}
                                     }
                                 }
                             }
-                            _ => {}
+                            KeyCode::Backspace => {
+                                if let AppState::ConfigureGrub { input_mode, input_buffer, .. } = &mut self.state {
+                                    if *input_mode != GrubConfigInputMode::None {
+                                        input_buffer.pop();
+                                    }
+                                }
+                            }
+                            _ => {
+                                if let AppState::ConfigureGrub { input_mode, input_buffer, .. } = &mut self.state {
+                                    if *input_mode != GrubConfigInputMode::None {
+                                        if let Some(c) = Self::key_to_char(&key) {
+                                            input_buffer.push(c);
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     5 => { // EditParameterList
@@ -603,7 +751,7 @@ impl App {
                                             *input_buffer = String::new();
                                         }
                                     } else {
-                                        // Return to kernel params menu with updated params
+                                        // Return to GRUB config menu with updated params
                                         let params = params.clone();
                                         let is_linux = title == "Edit GRUB_CMDLINE_LINUX";
                                         
@@ -613,21 +761,29 @@ impl App {
                                                 let linux_default_params = grub_config::parse_parameters(&config.grub_cmdline_linux_default);
                                                 
                                                 if is_linux {
-                                                    self.state = AppState::ConfigureKernelParams {
+                                                    self.state = AppState::ConfigureGrub {
                                                         selected: 0,
                                                         linux_params: params,
                                                         linux_default_params,
+                                                        timeout: config.grub_timeout,
+                                                        timeout_style: config.grub_timeout_style,
+                                                        input_mode: GrubConfigInputMode::None,
+                                                        input_buffer: String::new(),
                                                     };
                                                 } else {
-                                                    self.state = AppState::ConfigureKernelParams {
+                                                    self.state = AppState::ConfigureGrub {
                                                         selected: 1,
                                                         linux_params,
                                                         linux_default_params: params,
+                                                        timeout: config.grub_timeout,
+                                                        timeout_style: config.grub_timeout_style,
+                                                        input_mode: GrubConfigInputMode::None,
+                                                        input_buffer: String::new(),
                                                     };
                                                 }
                                             }
                                             Err(_) => {
-                                                self.state = AppState::MainMenu { selected: 0 };
+                                                self.navigate_back();
                                             }
                                         }
                                     }
@@ -699,16 +855,24 @@ impl App {
                                                                 let linux_default_params = grub_config::parse_parameters(&config.grub_cmdline_linux_default);
                                                                 
                                                                 if is_linux {
-                                                                    self.state = AppState::ConfigureKernelParams {
+                                                                    self.state = AppState::ConfigureGrub {
                                                                         selected: 0,
                                                                         linux_params: params,
                                                                         linux_default_params,
+                                                                        timeout: config.grub_timeout,
+                                                                        timeout_style: config.grub_timeout_style,
+                                                                        input_mode: GrubConfigInputMode::None,
+                                                                        input_buffer: String::new(),
                                                                     };
                                                                 } else {
-                                                                    self.state = AppState::ConfigureKernelParams {
+                                                                    self.state = AppState::ConfigureGrub {
                                                                         selected: 1,
                                                                         linux_params,
                                                                         linux_default_params: params,
+                                                                        timeout: config.grub_timeout,
+                                                                        timeout_style: config.grub_timeout_style,
+                                                                        input_mode: GrubConfigInputMode::None,
+                                                                        input_buffer: String::new(),
                                                                     };
                                                                 }
                                                             }
@@ -729,10 +893,14 @@ impl App {
                                                                 let linux_params = grub_config::parse_parameters(&config.grub_cmdline_linux);
                                                                 let linux_default_params = grub_config::parse_parameters(&config.grub_cmdline_linux_default);
                                                                 
-                                                                self.state = AppState::ConfigureKernelParams {
+                                                                self.state = AppState::ConfigureGrub {
                                                                     selected: if is_linux { 0 } else { 1 },
                                                                     linux_params,
                                                                     linux_default_params,
+                                                                    timeout: config.grub_timeout,
+                                                                    timeout_style: config.grub_timeout_style,
+                                                                    input_mode: GrubConfigInputMode::None,
+                                                                    input_buffer: String::new(),
                                                                 };
                                                             }
                                                             Err(_) => {
@@ -753,16 +921,24 @@ impl App {
                                                                 let linux_default_params = grub_config::parse_parameters(&config.grub_cmdline_linux_default);
                                                                 
                                                                 if is_linux {
-                                                                    self.state = AppState::ConfigureKernelParams {
+                                                                    self.state = AppState::ConfigureGrub {
                                                                         selected: 0,
                                                                         linux_params: params,
                                                                         linux_default_params,
+                                                                        timeout: config.grub_timeout,
+                                                                        timeout_style: config.grub_timeout_style,
+                                                                        input_mode: GrubConfigInputMode::None,
+                                                                        input_buffer: String::new(),
                                                                     };
                                                                 } else {
-                                                                    self.state = AppState::ConfigureKernelParams {
+                                                                    self.state = AppState::ConfigureGrub {
                                                                         selected: 1,
                                                                         linux_params,
                                                                         linux_default_params: params,
+                                                                        timeout: config.grub_timeout,
+                                                                        timeout_style: config.grub_timeout_style,
+                                                                        input_mode: GrubConfigInputMode::None,
+                                                                        input_buffer: String::new(),
                                                                     };
                                                                 }
                                                             }
@@ -782,10 +958,14 @@ impl App {
                                                             let linux_params = grub_config::parse_parameters(&config.grub_cmdline_linux);
                                                             let linux_default_params = grub_config::parse_parameters(&config.grub_cmdline_linux_default);
                                                             
-                                                            self.state = AppState::ConfigureKernelParams {
+                                                            self.state = AppState::ConfigureGrub {
                                                                 selected: if is_linux { 0 } else { 1 },
                                                                 linux_params,
                                                                 linux_default_params,
+                                                                timeout: config.grub_timeout,
+                                                                timeout_style: config.grub_timeout_style,
+                                                                input_mode: GrubConfigInputMode::None,
+                                                                input_buffer: String::new(),
                                                             };
                                                         }
                                                         Err(_) => {
@@ -871,158 +1051,15 @@ impl App {
                     6 => { // ViewDefaultEntry
                         match key.code {
                             KeyCode::Esc | KeyCode::Enter | KeyCode::Left => {
-                                self.state = AppState::MainMenu { selected: 0 };
+                                self.navigate_back();
                             }
                             _ => {}
-                        }
-                    }
-                    7 => { // ConfigureTimeout
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Left => {
-                                if let AppState::ConfigureTimeout { input_mode, input_buffer, .. } = &mut self.state {
-                                    if *input_mode != TimeoutInputMode::None {
-                                        *input_mode = TimeoutInputMode::None;
-                                        *input_buffer = String::new();
-                                    } else {
-                                        self.state = AppState::MainMenu { selected: 0 };
-                                    }
-                                }
-                            }
-                            KeyCode::Up => {
-                                if let AppState::ConfigureTimeout { selected, input_mode, .. } = &mut self.state {
-                                    if *input_mode == TimeoutInputMode::None {
-                                        if *selected == 0 {
-                                            *selected = 3;
-                                        } else {
-                                            *selected -= 1;
-                                        }
-                                    }
-                                }
-                            }
-                            KeyCode::Down => {
-                                if let AppState::ConfigureTimeout { selected, input_mode, .. } = &mut self.state {
-                                    if *input_mode == TimeoutInputMode::None {
-                                        *selected = (*selected + 1) % 4;
-                                    }
-                                }
-                            }
-                            KeyCode::Enter | KeyCode::Right => {
-                                let is_right_key = matches!(key.code, KeyCode::Right);
-                                if let AppState::ConfigureTimeout { selected, timeout, timeout_style, input_mode, input_buffer } = &mut self.state {
-                                    let current_input_mode = input_mode.clone();
-                                    match current_input_mode {
-                                        TimeoutInputMode::None => {
-                                            match *selected {
-                                                0 => {
-                                                    // Edit timeout
-                                                    *input_mode = TimeoutInputMode::EditTimeout;
-                                                    *input_buffer = timeout.clone();
-                                                }
-                                                1 => {
-                                                    // Edit timeout style
-                                                    *input_mode = TimeoutInputMode::SelectTimeoutStyle;
-                                                    *input_buffer = String::new();
-                                                }
-                                                2 => {
-                                                    // Save
-                                                    let mut config = match grub_config::GrubConfig::load() {
-                                                        Ok(c) => c,
-                                                        Err(e) => {
-                                                            self.state = AppState::Message {
-                                                                title: "Error".to_string(),
-                                                                content: vec![
-                                                                    format!("Error loading config: {}", e),
-                                                                ],
-                                                                message_type: MessageType::Error,
-                                                            };
-                                                            continue;
-                                                        }
-                                                    };
-                                                    config.grub_timeout = timeout.clone();
-                                                    config.grub_timeout_style = timeout_style.clone();
-                                                    
-                                                    match config.save() {
-                                                        Ok(_) => {
-                                                            self.state = AppState::Message {
-                                                                title: "Success".to_string(),
-                                                                content: vec![
-                                                                    "Configuration saved successfully!".to_string(),
-                                                                    "".to_string(),
-                                                                    "Please run:".to_string(),
-                                                                    "  sudo update-grub".to_string(),
-                                                                ],
-                                                                message_type: MessageType::Success,
-                                                            };
-                                                        }
-                                                        Err(e) => {
-                                                            self.state = AppState::Message {
-                                                                title: "Error".to_string(),
-                                                                content: vec![
-                                                                    format!("Error saving configuration: {}", e),
-                                                                ],
-                                                                message_type: MessageType::Error,
-                                                            };
-                                                        }
-                                                    }
-                                                }
-                                                3 => {
-                                                    // Cancel
-                                                    self.state = AppState::MainMenu { selected: 0 };
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                        TimeoutInputMode::EditTimeout => {
-                                            if !input_buffer.trim().is_empty() {
-                                                *timeout = input_buffer.trim().to_string();
-                                            }
-                                            
-                                            // If Right key was pressed, move to timeout style editing
-                                            if is_right_key {
-                                                *selected = 1;
-                                                *input_mode = TimeoutInputMode::SelectTimeoutStyle;
-                                                *input_buffer = String::new();
-                                            } else {
-                                                // Enter key, just exit edit mode
-                                                *input_mode = TimeoutInputMode::None;
-                                                *input_buffer = String::new();
-                                            }
-                                        }
-                                        TimeoutInputMode::SelectTimeoutStyle => {
-                                            let style = input_buffer.trim().to_lowercase();
-                                            if style == "menu" || style == "hidden" || style == "countdown" {
-                                                *timeout_style = style;
-                                            }
-                                            
-                                            // If Right key was pressed, could move to save, but for now just exit
-                                            *input_mode = TimeoutInputMode::None;
-                                            *input_buffer = String::new();
-                                        }
-                                    }
-                                }
-                            }
-                            KeyCode::Backspace => {
-                                if let AppState::ConfigureTimeout { input_mode, input_buffer, .. } = &mut self.state {
-                                    if *input_mode != TimeoutInputMode::None {
-                                        input_buffer.pop();
-                                    }
-                                }
-                            }
-                            _ => {
-                                if let AppState::ConfigureTimeout { input_mode, input_buffer, .. } = &mut self.state {
-                                    if *input_mode != TimeoutInputMode::None {
-                                        if let Some(c) = Self::key_to_char(&key) {
-                                            input_buffer.push(c);
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                     8 => { // ConfirmSetDefaultEntry
                         match key.code {
                             KeyCode::Esc => {
-                                self.state = AppState::MainMenu { selected: 0 };
+                                self.navigate_back();
                             }
                             KeyCode::Char('y') | KeyCode::Char('Y') => {
                                 if let AppState::ConfirmSetDefaultEntry { path, .. } = &self.state {
@@ -1072,7 +1109,7 @@ impl App {
                                 }
                             }
                             KeyCode::Char('n') | KeyCode::Char('N') => {
-                                self.state = AppState::MainMenu { selected: 0 };
+                                self.navigate_back();
                             }
                             _ => {}
                         }
@@ -1088,7 +1125,7 @@ impl App {
                     10 => { // ViewKernelInfo
                         match key.code {
                             KeyCode::Esc | KeyCode::Left => {
-                                self.state = AppState::MainMenu { selected: 0 };
+                                self.navigate_back();
                             }
                             _ => {}
                         }
@@ -1096,7 +1133,7 @@ impl App {
                     11 => { // CleanupKernels
                         match key.code {
                             KeyCode::Esc | KeyCode::Left => {
-                                self.state = AppState::MainMenu { selected: 0 };
+                                self.navigate_back();
                             }
                             KeyCode::Up => {
                                 if let AppState::CleanupKernels { kernels, selected } = &mut self.state {
@@ -1149,7 +1186,7 @@ impl App {
                     12 => { // RenameBootEntry
                         match key.code {
                             KeyCode::Esc | KeyCode::Left => {
-                                self.state = AppState::MainMenu { selected: 0 };
+                                self.navigate_back();
                             }
                             KeyCode::Enter => {
                                 if let AppState::RenameBootEntry { path, input_buffer, .. } = &self.state {
@@ -1187,7 +1224,7 @@ impl App {
                     13 => { // BackupManager
                         match key.code {
                             KeyCode::Esc | KeyCode::Left => {
-                                self.state = AppState::MainMenu { selected: 0 };
+                                self.navigate_back();
                             }
                             KeyCode::Up => {
                                 if let AppState::BackupManager { backups, selected } = &mut self.state {
@@ -1265,7 +1302,151 @@ impl App {
                     14 => { // ValidateGrub
                         match key.code {
                             KeyCode::Esc | KeyCode::Enter | KeyCode::Left => {
-                                self.state = AppState::MainMenu { selected: 0 };
+                                self.navigate_back();
+                            }
+                            _ => {}
+                        }
+                    }
+                    15 => { // BootTimeStats
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Left => {
+                                self.navigate_back();
+                            }
+                            KeyCode::Enter => {
+                                // Enter does nothing in BootTimeStats, just go back
+                                self.navigate_back();
+                            }
+                            KeyCode::Up => {
+                                if let AppState::BootTimeStats { entries, selected } = &mut self.state {
+                                    if !entries.is_empty() {
+                                        if *selected == 0 {
+                                            *selected = entries.len() - 1;
+                                        } else {
+                                            *selected -= 1;
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Down => {
+                                if let AppState::BootTimeStats { entries, selected } = &mut self.state {
+                                    if !entries.is_empty() {
+                                        *selected = (*selected + 1) % entries.len();
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    16 => { // EditAllGrubParams
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Left => {
+                                self.navigate_back();
+                            }
+                            KeyCode::Up => {
+                                if let AppState::EditAllGrubParams { params, selected, input_mode, .. } = &mut self.state {
+                                    if *input_mode == GrubConfigInputMode::None {
+                                        if !params.is_empty() {
+                                            if *selected == 0 {
+                                                *selected = params.len() - 1;
+                                            } else {
+                                                *selected -= 1;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Down => {
+                                if let AppState::EditAllGrubParams { params, selected, input_mode, .. } = &mut self.state {
+                                    if *input_mode == GrubConfigInputMode::None {
+                                        if !params.is_empty() {
+                                            *selected = (*selected + 1) % params.len();
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Enter => {
+                                if let AppState::EditAllGrubParams { params, selected, input_mode, input_buffer } = &mut self.state {
+                                    match input_mode {
+                                        GrubConfigInputMode::None => {
+                                            if !params.is_empty() && *selected < params.len() {
+                                                *input_mode = GrubConfigInputMode::EditTimeout;
+                                                *input_buffer = params[*selected].1.clone();
+                                            }
+                                        }
+                                        GrubConfigInputMode::EditTimeout => {
+                                            // Save the edited value
+                                            if *selected < params.len() {
+                                                params[*selected].1 = input_buffer.clone();
+                                                *input_mode = GrubConfigInputMode::None;
+                                                *input_buffer = String::new();
+                                                
+                                                // Save to config
+                                                match grub_config::GrubConfig::load() {
+                                                    Ok(mut config) => {
+                                                        config.set(&params[*selected].0, input_buffer.clone());
+                                                        if let Err(e) = config.save() {
+                                                            self.state = AppState::Message {
+                                                                title: "Error".to_string(),
+                                                                content: vec![format!("Error saving parameter: {}", e)],
+                                                                message_type: MessageType::Error,
+                                                            };
+                                                        } else {
+                                                            // Reload parameters to reflect changes
+                                                            match grub_config::GrubConfig::load() {
+                                                                Ok(updated_config) => {
+                                                                    let mut updated_params: Vec<(String, String)> = updated_config.get_all_params()
+                                                                        .iter()
+                                                                        .map(|(k, v)| (k.clone(), v.clone()))
+                                                                        .collect();
+                                                                    updated_params.sort_by(|a, b| a.0.cmp(&b.0));
+                                                                    // Find the same parameter index
+                                                                    let new_selected = updated_params.iter()
+                                                                        .position(|(k, _)| k == &params[*selected].0)
+                                                                        .unwrap_or(*selected);
+                                                                    self.state = AppState::EditAllGrubParams {
+                                                                        params: updated_params,
+                                                                        selected: new_selected,
+                                                                        input_mode: GrubConfigInputMode::None,
+                                                                        input_buffer: String::new(),
+                                                                    };
+                                                                }
+                                                                Err(e) => {
+                                                                    self.state = AppState::Message {
+                                                                        title: "Error".to_string(),
+                                                                        content: vec![format!("Error reloading config: {}", e)],
+                                                                        message_type: MessageType::Error,
+                                                                    };
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        self.state = AppState::Message {
+                                                            title: "Error".to_string(),
+                                                            content: vec![format!("Error loading config: {}", e)],
+                                                            message_type: MessageType::Error,
+                                                        };
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            KeyCode::Char(c) => {
+                                if let AppState::EditAllGrubParams { input_mode, input_buffer, .. } = &mut self.state {
+                                    if *input_mode == GrubConfigInputMode::EditTimeout {
+                                        if c == '\n' || c == '\r' {
+                                            // Enter key handled above
+                                        } else if c == '\x08' || c == '\x7f' {
+                                            // Backspace
+                                            input_buffer.pop();
+                                        } else {
+                                            input_buffer.push(c);
+                                        }
+                                    }
+                                }
                             }
                             _ => {}
                         }
@@ -1281,23 +1462,31 @@ impl App {
         match selected {
             0 => {
                 // Set Default Boot Entry
-                self.state = AppState::SelectBootEntry {
+                self.navigate_to(AppState::SelectBootEntry {
                     path: vec![],
                     selected: 0,
                     action: None,
-                };
+                }, true);
             }
             1 => {
-                // Configure Kernel Parameters
+                // View Default Boot Entry
+                self.navigate_to(AppState::ViewDefaultEntry, true);
+            }
+            2 => {
+                // Configure GRUB Settings
                 match grub_config::GrubConfig::load() {
                     Ok(config) => {
                         let linux_params = grub_config::parse_parameters(&config.grub_cmdline_linux);
                         let linux_default_params = grub_config::parse_parameters(&config.grub_cmdline_linux_default);
-                        self.state = AppState::ConfigureKernelParams {
+                        self.navigate_to(AppState::ConfigureGrub {
                             selected: 0,
                             linux_params,
                             linux_default_params,
-                        };
+                            timeout: config.grub_timeout,
+                            timeout_style: config.grub_timeout_style,
+                            input_mode: GrubConfigInputMode::None,
+                            input_buffer: String::new(),
+                        }, true);
                     }
                     Err(e) => {
                         // TODO: Show error message
@@ -1305,59 +1494,29 @@ impl App {
                     }
                 }
             }
-            2 => {
-                // Configure GRUB Timeout
-                match grub_config::GrubConfig::load() {
-                    Ok(config) => {
-                        self.state = AppState::ConfigureTimeout {
-                            selected: 0,
-                            timeout: config.grub_timeout,
-                            timeout_style: config.grub_timeout_style,
-                            input_mode: TimeoutInputMode::None,
-                            input_buffer: String::new(),
-                        };
-                    }
-                    Err(_) => {
-                        return Ok(());
-                    }
-                }
-            }
             3 => {
-                // View Default Boot Entry
-                self.state = AppState::ViewDefaultEntry;
-            }
-            4 => {
                 // Cleanup Old Kernels
                 let kernels = kernel_cleanup::scan_unused_kernels();
-                self.state = AppState::CleanupKernels {
+                self.navigate_to(AppState::CleanupKernels {
                     kernels,
                     selected: 0,
-                };
+                }, true);
             }
-            5 => {
+            4 => {
                 // Backup Manager
                 let backups = backup_manager::list_backups();
-                self.state = AppState::BackupManager {
+                self.navigate_to(AppState::BackupManager {
                     backups,
                     selected: 0,
-                };
+                }, true);
             }
-            6 => {
-                // Validate GRUB Config
-                match grub_validate::validate_grub_config() {
-                    Ok(result) => {
-                        self.state = AppState::ValidateGrub {
-                            result: Some(result),
-                        };
-                    }
-                    Err(e) => {
-                        self.state = AppState::Message {
-                            title: "Error".to_string(),
-                            content: vec![format!("Failed to validate GRUB config: {}", e)],
-                            message_type: MessageType::Error,
-                        };
-                    }
-                }
+            5 => {
+                // Boot Time Statistics
+                let entries = boot_time::get_boot_times();
+                self.navigate_to(AppState::BootTimeStats {
+                    entries,
+                    selected: 0,
+                }, true);
             }
             _ => {}
         }
@@ -1375,12 +1534,12 @@ impl App {
         let mut query = String::new();
         query.push(c);
         let results = self.collect_all_matches(&query);
-        self.state = AppState::SelectBootEntrySearch {
+        self.navigate_to(AppState::SelectBootEntrySearch {
             path,
             query,
             results,
             selected: 0,
-        };
+        }, true);
     }
 
     fn update_search_results(&mut self) {
@@ -1453,12 +1612,10 @@ impl App {
             AppState::MainMenu { selected } => {
                 let items: Vec<ListItem> = vec![
                     ListItem::new("⭐ Set Default Boot Entry"),
-                    ListItem::new("⚙ Configure Kernel Parameters"),
-                    ListItem::new("⏱ Configure GRUB Timeout"),
                     ListItem::new("👁 View Default Boot Entry"),
+                    ListItem::new("⚙ Configure GRUB Settings"),
                     ListItem::new("🧹 Cleanup Old Kernels"),
                     ListItem::new("💾 Backup Manager"),
-                    ListItem::new("✓ Validate GRUB Config"),
                     ListItem::new("⏱ Boot Time Statistics"),
                 ]
                 .into_iter()
@@ -1573,23 +1730,41 @@ impl App {
                 state.select(Some(*selected));
                 f.render_stateful_widget(list, chunks[1], &mut state);
             }
-            AppState::ConfigureKernelParams { selected, linux_params, linux_default_params } => {
-                let items: Vec<ListItem> = vec![
+            AppState::ConfigureGrub { selected, linux_params, linux_default_params, timeout, timeout_style, input_mode, input_buffer } => {
+                let mut items: Vec<ListItem> = vec![
                     ListItem::new(format!("1. GRUB_CMDLINE_LINUX ({})", 
                         if linux_params.is_empty() { "empty".to_string() } 
                         else { format!("{} parameters", linux_params.len()) })),
                     ListItem::new(format!("2. GRUB_CMDLINE_LINUX_DEFAULT ({})", 
                         if linux_default_params.is_empty() { "empty".to_string() } 
                         else { format!("{} parameters", linux_default_params.len()) })),
-                    ListItem::new("3. Save and exit"),
-                    ListItem::new("4. Cancel"),
-                ]
-                .into_iter()
-                .map(|item| item.style(Style::default().fg(Color::White)))
-                .collect();
+                ];
+                
+                // Add timeout configuration items
+                let timeout_display = match input_mode {
+                    GrubConfigInputMode::EditTimeout => input_buffer.clone(),
+                    _ => timeout.clone(),
+                };
+                items.push(ListItem::new(format!("3. GRUB_TIMEOUT: {}", timeout_display)));
+                
+                let timeout_style_display = match input_mode {
+                    GrubConfigInputMode::SelectTimeoutStyle => input_buffer.clone(),
+                    _ => timeout_style.clone(),
+                };
+                items.push(ListItem::new(format!("4. GRUB_TIMEOUT_STYLE: {}", timeout_style_display)));
+                
+                items.push(ListItem::new("5. View/Edit All Parameters"));
+                items.push(ListItem::new("6. Validate GRUB Config"));
+                items.push(ListItem::new("7. Save"));
+                items.push(ListItem::new("8. Cancel"));
+                
+                let items: Vec<ListItem> = items
+                    .into_iter()
+                    .map(|item| item.style(Style::default().fg(Color::White)))
+                    .collect();
 
                 let list = List::new(items)
-                    .block(Block::default().borders(Borders::ALL).title("Configure Kernel Boot Parameters"))
+                    .block(Block::default().borders(Borders::ALL).title("Configure GRUB Settings"))
                     .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
                     .highlight_symbol(">> ");
 
@@ -1712,58 +1887,6 @@ impl App {
                     .alignment(Alignment::Left);
                 f.render_widget(info, chunks[1]);
             }
-            AppState::ConfigureTimeout { selected, timeout, timeout_style, input_mode, input_buffer } => {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Length(3),
-                        Constraint::Min(0),
-                    ])
-                    .split(chunks[1]);
-
-                // Input area
-                let input_text = match input_mode {
-                    TimeoutInputMode::None => "".to_string(),
-                    TimeoutInputMode::EditTimeout => input_buffer.clone(),
-                    TimeoutInputMode::SelectTimeoutStyle => input_buffer.clone(),
-                };
-                let input_title = match input_mode {
-                    TimeoutInputMode::None => "Options".to_string(),
-                    TimeoutInputMode::EditTimeout => {
-                        format!("Enter timeout in seconds (current: {}, -1 for no timeout)", timeout)
-                    }
-                    TimeoutInputMode::SelectTimeoutStyle => {
-                        format!("Enter timeout style (current: {}, options: menu/hidden/countdown)", timeout_style)
-                    }
-                };
-                
-                let input_widget = Paragraph::new(input_text.as_str())
-                    .block(Block::default().borders(Borders::ALL).title(input_title))
-                    .style(Style::default().fg(Color::Yellow));
-                f.render_widget(input_widget, chunks[0]);
-
-                // Menu list
-                let items: Vec<ListItem> = vec![
-                    ListItem::new(format!("1. GRUB_TIMEOUT: {}", timeout)),
-                    ListItem::new(format!("2. GRUB_TIMEOUT_STYLE: {}", timeout_style)),
-                    ListItem::new("3. Save and exit"),
-                    ListItem::new("4. Cancel"),
-                ]
-                .into_iter()
-                .map(|item| item.style(Style::default().fg(Color::White)))
-                .collect();
-
-                let list = List::new(items)
-                    .block(Block::default().borders(Borders::ALL).title("Configure GRUB Timeout"))
-                    .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-                    .highlight_symbol(">> ");
-
-                let mut state = ListState::default();
-                if *input_mode == TimeoutInputMode::None {
-                    state.select(Some(*selected));
-                }
-                f.render_stateful_widget(list, chunks[1], &mut state);
-            }
             AppState::ConfirmSetDefaultEntry { path, entry_name } => {
                 let p_str: String = path.iter()
                     .map(|x| x.to_string())
@@ -1862,7 +1985,7 @@ impl App {
                 f.render_stateful_widget(list, chunks[1], &mut state);
             }
             AppState::RenameBootEntry { path, original_name, input_buffer } => {
-                let mut content = vec![
+                let content = vec![
                     Line::from(""),
                     Line::from(vec![
                         Span::styled("Original Name: ", Style::default().fg(Color::Blue)),
@@ -1958,8 +2081,7 @@ impl App {
                     vec![ListItem::new("No boot time data available")]
                 } else {
                     entries.iter()
-                        .enumerate()
-                        .map(|(idx, entry)| {
+                        .map(|entry| {
                             let time_str = boot_time::format_boot_time(entry.boot_time);
                             ListItem::new(format!("{} - {} - {}", 
                                 entry.kernel_version, time_str, entry.timestamp))
@@ -1974,6 +2096,35 @@ impl App {
                 
                 let mut state = ListState::default();
                 if !entries.is_empty() {
+                    state.select(Some(*selected));
+                }
+                f.render_stateful_widget(list, chunks[1], &mut state);
+            }
+            AppState::EditAllGrubParams { params, selected, input_mode, input_buffer } => {
+                let items: Vec<ListItem> = if params.is_empty() {
+                    vec![ListItem::new("No parameters found")]
+                } else {
+                    params.iter()
+                        .enumerate()
+                        .map(|(idx, (key, value))| {
+                            let display_value = match input_mode {
+                                GrubConfigInputMode::EditTimeout if idx == *selected => input_buffer.clone(),
+                                _ => value.clone(),
+                            };
+                            ListItem::new(format!("{} = {}", key, display_value))
+                        })
+                        .collect()
+                };
+                
+                let list = List::new(items)
+                    .block(Block::default()
+                        .borders(Borders::ALL)
+                        .title("All GRUB Parameters (Enter to edit, Esc to return)"))
+                    .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+                    .highlight_symbol(">> ");
+                
+                let mut state = ListState::default();
+                if !params.is_empty() {
                     state.select(Some(*selected));
                 }
                 f.render_stateful_widget(list, chunks[1], &mut state);
