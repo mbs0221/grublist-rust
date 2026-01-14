@@ -1321,14 +1321,6 @@ impl App {
                 self.state = AppState::ViewDefaultEntry;
             }
             4 => {
-                // View Kernel Info - need to show entry selection first
-                self.state = AppState::SelectBootEntry {
-                    path: vec![],
-                    selected: 0,
-                    action: Some(SelectBootEntryAction::ViewKernelInfo),
-                };
-            }
-            5 => {
                 // Cleanup Old Kernels
                 let kernels = kernel_cleanup::scan_unused_kernels();
                 self.state = AppState::CleanupKernels {
@@ -1336,7 +1328,7 @@ impl App {
                     selected: 0,
                 };
             }
-            6 => {
+            5 => {
                 // Backup Manager
                 let backups = backup_manager::list_backups();
                 self.state = AppState::BackupManager {
@@ -1344,7 +1336,7 @@ impl App {
                     selected: 0,
                 };
             }
-            7 => {
+            6 => {
                 // Validate GRUB Config
                 match grub_validate::validate_grub_config() {
                     Ok(result) => {
