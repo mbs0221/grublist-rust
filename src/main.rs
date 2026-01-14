@@ -42,7 +42,9 @@ fn print_banner(bcolors: &Bcolors) {
 }
 
 fn menu(entry: Entry, bcolors: &Bcolors) {
-    let mut path = vec![0];
+    // Start at first config option (boot entries are not shown in main menu)
+    let config_start_idx = entry.children.len();
+    let mut path = vec![config_start_idx];
     let mut search_mode = false;
     let mut search_query = String::new();
     let mut search_results: Vec<Vec<usize>> = Vec::new();
@@ -93,7 +95,7 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
             }
         } else {
             println!();
-            print_entry(&entry, &path, 0, bcolors);
+            print_config_menu_only(&entry, &path, bcolors);
         }
         
         let k = loop {
@@ -171,17 +173,16 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
             }
             2 => { // Down
                 if let Some(p) = path.pop() {
-                    let entry_ref = get_entry(&entry, &path);
-                    // Include config options in max index
-                    let max_idx = entry_ref.children.len() + 3; // kernel params, default entry, timeout
+                    // Only config options available at root level (4 options: 0-3)
+                    let max_idx = 3;
                     let new_p = (p + 1).min(max_idx);
                     path.push(new_p);
                 }
             }
             3 | 5 => { // Right & Enter
-                // Check if config options are selected
-                let config_idx = entry.children.len();
+                // Only config options at root level
                 if path.len() == 1 {
+                    let config_idx = entry.children.len();
                     if path[0] == config_idx {
                         grub_config::edit_kernel_parameters(bcolors);
                         continue;
@@ -197,15 +198,6 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
                     } else if path[0] == config_idx + 3 {
                         grub_config::configure_timeout(bcolors);
                         continue;
-                    }
-                }
-                
-                let entry_ref = get_entry(&entry, &path);
-                if entry_ref.entry_type == EntryType::Submenu {
-                    path.push(0);
-                } else {
-                    if set_entry(&entry, &path, bcolors) {
-                        break;
                     }
                 }
             }
@@ -232,6 +224,68 @@ fn menu(entry: Entry, bcolors: &Bcolors) {
             }
             _ => {}
         }
+    }
+}
+
+fn print_config_menu_only(root: &Entry, path: &[usize], bcolors: &Bcolors) {
+    // Only show configuration options, not boot entries
+    let config_idx = root.children.len();
+    let indent = " ".repeat(4 * 0);
+    
+    // Option 1: Configure Kernel Parameters
+    let config_selected = path.len() == 1 && path[0] == config_idx;
+    let config_tag = format!("[{}⚙] ", bcolors.okblue("⚙"));
+    if config_selected {
+        println!("{}{}{}{}{}", 
+            indent,
+            config_tag,
+            bcolors.inverse("Configure Kernel Parameters"),
+            bcolors.endc(),
+            "");
+    } else {
+        println!("{}{}{}", indent, config_tag, "Configure Kernel Parameters");
+    }
+    
+    // Option 2: View Default Entry
+    let view_selected = path.len() == 1 && path[0] == config_idx + 1;
+    let view_tag = format!("[{}👁] ", bcolors.okblue("👁"));
+    if view_selected {
+        println!("{}{}{}{}{}", 
+            indent,
+            view_tag,
+            bcolors.inverse("View Default Boot Entry"),
+            bcolors.endc(),
+            "");
+    } else {
+        println!("{}{}{}", indent, view_tag, "View Default Boot Entry");
+    }
+    
+    // Option 3: Set Default Entry
+    let set_selected = path.len() == 1 && path[0] == config_idx + 2;
+    let set_tag = format!("[{}⭐] ", bcolors.okblue("⭐"));
+    if set_selected {
+        println!("{}{}{}{}{}", 
+            indent,
+            set_tag,
+            bcolors.inverse("Set Default Boot Entry"),
+            bcolors.endc(),
+            "");
+    } else {
+        println!("{}{}{}", indent, set_tag, "Set Default Boot Entry");
+    }
+    
+    // Option 4: Configure Timeout
+    let timeout_selected = path.len() == 1 && path[0] == config_idx + 3;
+    let timeout_tag = format!("[{}⏱] ", bcolors.okblue("⏱"));
+    if timeout_selected {
+        println!("{}{}{}{}{}", 
+            indent,
+            timeout_tag,
+            bcolors.inverse("Configure GRUB Timeout"),
+            bcolors.endc(),
+            "");
+    } else {
+        println!("{}{}{}", indent, timeout_tag, "Configure GRUB Timeout");
     }
 }
 
