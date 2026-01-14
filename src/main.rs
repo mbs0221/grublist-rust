@@ -1459,6 +1459,7 @@ impl App {
                     ListItem::new("🧹 Cleanup Old Kernels"),
                     ListItem::new("💾 Backup Manager"),
                     ListItem::new("✓ Validate GRUB Config"),
+                    ListItem::new("⏱ Boot Time Statistics"),
                 ]
                 .into_iter()
                 .map(|item| item.style(Style::default().fg(Color::White)))
@@ -1951,6 +1952,31 @@ impl App {
                     .block(Block::default().borders(Borders::ALL).title("GRUB Configuration Validation"))
                     .alignment(Alignment::Left);
                 f.render_widget(info, chunks[1]);
+            }
+            AppState::BootTimeStats { entries, selected } => {
+                let items: Vec<ListItem> = if entries.is_empty() {
+                    vec![ListItem::new("No boot time data available")]
+                } else {
+                    entries.iter()
+                        .enumerate()
+                        .map(|(idx, entry)| {
+                            let time_str = boot_time::format_boot_time(entry.boot_time);
+                            ListItem::new(format!("{} - {} - {}", 
+                                entry.kernel_version, time_str, entry.timestamp))
+                        })
+                        .collect()
+                };
+                
+                let list = List::new(items)
+                    .block(Block::default().borders(Borders::ALL).title("Boot Time Statistics"))
+                    .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+                    .highlight_symbol(">> ");
+                
+                let mut state = ListState::default();
+                if !entries.is_empty() {
+                    state.select(Some(*selected));
+                }
+                f.render_stateful_widget(list, chunks[1], &mut state);
             }
             AppState::Message { title, content, message_type } => {
                 let color = match message_type {
