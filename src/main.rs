@@ -451,6 +451,41 @@ fn find_previous_match(root: &Entry, current_path: &[usize], query: &str) -> Opt
 
 // get_entry is now in grub module
 
+fn print_entry_only(root: &Entry, path: &[usize], level: usize, bcolors: &Bcolors) {
+    // Only print boot entries, no config options
+    for (i, child) in root.children.iter().enumerate() {
+        let is_selected = level < path.len() && path[level] == i;
+        
+        let indent = " ".repeat(4 * level);
+        
+        if is_selected {
+            let tag = match child.entry_type {
+                EntryType::Submenu => format!("[{}+] ", bcolors.fail("+")),
+                EntryType::MenuEntry => format!("[{}●] ", bcolors.okgreen("●")),
+                EntryType::Root => String::new(),
+            };
+            println!("{}{}{}{}{}", 
+                indent, 
+                tag,
+                bcolors.inverse(&child.name),
+                bcolors.endc(),
+                "");
+            
+            // If it's a submenu and there's a deeper level in path, recurse
+            if child.entry_type == EntryType::Submenu && level + 1 < path.len() {
+                print_entry_only(child, path, level + 1, bcolors);
+            }
+        } else {
+            let tag = match child.entry_type {
+                EntryType::Submenu => format!("[{}+] ", bcolors.fail("+")),
+                EntryType::MenuEntry => format!("[{}●] ", bcolors.okgreen("●")),
+                EntryType::Root => String::new(),
+            };
+            println!("{}{}{}", indent, tag, child.name);
+        }
+    }
+}
+
 fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
     let mut path = vec![0];
     let mut in_selection_mode = true;
@@ -468,7 +503,7 @@ fn select_boot_entry(entry: &Entry, bcolors: &Bcolors) -> Option<Vec<usize>> {
         println!("{}Press ← or q to cancel{}", bcolors.okblue(""), bcolors.endc());
         println!();
         
-        print_entry(&entry, &path, 0, bcolors);
+        print_entry_only(&entry, &path, 0, bcolors);
         
         let k = loop {
             match get_key_input() {
