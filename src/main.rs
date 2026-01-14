@@ -1,6 +1,11 @@
 mod colorprint;
 mod grub;
 mod grub_config;
+mod kernel_info;
+mod kernel_cleanup;
+mod custom_names;
+mod backup_manager;
+mod grub_validate;
 
 use grub::{Entry, EntryType, load_grub, get_entry, try_get_entry};
 use ratatui::{
@@ -68,6 +73,7 @@ enum AppState {
     SelectBootEntry {
         path: Vec<usize>,
         selected: usize,
+        action: Option<SelectBootEntryAction>,
     },
     SelectBootEntrySearch {
         path: Vec<usize>,
@@ -104,12 +110,38 @@ enum AppState {
         content: Vec<String>,
         message_type: MessageType,
     },
+    ViewKernelInfo {
+        path: Vec<usize>,
+        kernel_info: Option<kernel_info::KernelInfo>,
+    },
+    CleanupKernels {
+        kernels: Vec<kernel_cleanup::KernelToClean>,
+        selected: usize,
+    },
+    RenameBootEntry {
+        path: Vec<usize>,
+        original_name: String,
+        input_buffer: String,
+    },
+    BackupManager {
+        backups: Vec<backup_manager::BackupInfo>,
+        selected: usize,
+    },
+    ValidateGrub {
+        result: Option<grub_validate::ValidationResult>,
+    },
 }
 
 enum MessageType {
     Success,
     Error,
     Info,
+}
+
+#[derive(PartialEq, Clone)]
+enum SelectBootEntryAction {
+    ViewKernelInfo,
+    Rename,
 }
 
 #[derive(PartialEq, Clone)]
@@ -154,7 +186,7 @@ impl App {
                 let state_snapshot = match &self.state {
                     AppState::MainMenu { selected } => (0, *selected),
                     AppState::SearchMode { selected } => (1, *selected),
-                    AppState::SelectBootEntry { path, selected } => (2, *selected),
+                    AppState::SelectBootEntry { path, selected, .. } => (2, *selected),
                     AppState::SelectBootEntrySearch { path: _, query: _, results: _, selected } => (3, *selected),
                     AppState::ConfigureKernelParams { selected, .. } => (4, *selected),
                     AppState::EditParameterList { selected, .. } => (5, *selected),
@@ -162,6 +194,11 @@ impl App {
                     AppState::ConfigureTimeout { selected, .. } => (7, *selected),
                     AppState::ConfirmSetDefaultEntry { .. } => (8, 0),
                     AppState::Message { .. } => (9, 0),
+                    AppState::ViewKernelInfo { .. } => (10, 0),
+                    AppState::CleanupKernels { selected, .. } => (11, *selected),
+                    AppState::RenameBootEntry { .. } => (12, 0),
+                    AppState::BackupManager { selected, .. } => (13, *selected),
+                    AppState::ValidateGrub { .. } => (14, 0),
                 };
 
                 match state_snapshot.0 {
@@ -171,7 +208,7 @@ impl App {
                             KeyCode::Up => {
                                 if let AppState::MainMenu { selected } = &mut self.state {
                                     if *selected == 0 {
-                                        *selected = 3;
+                                        *selected = 8;
                                     } else {
                                         *selected -= 1;
                                     }
@@ -179,7 +216,7 @@ impl App {
                             }
                             KeyCode::Down => {
                                 if let AppState::MainMenu { selected } = &mut self.state {
-                                    *selected = (*selected + 1) % 4;
+                                    *selected = (*selected + 1) % 9;
                                 }
                             }
                             KeyCode::Enter | KeyCode::Right => {
@@ -245,7 +282,7 @@ impl App {
                                 self.state = AppState::MainMenu { selected: 0 };
                             }
                             KeyCode::Up => {
-                                if let AppState::SelectBootEntry { path, selected } = &mut self.state {
+                                if let AppState::SelectBootEntry { path, selected, .. } = &mut self.state {
                                     let entry_ref = if path.is_empty() {
                                         &self.entry
                                     } else {
@@ -262,7 +299,7 @@ impl App {
                                 }
                             }
                             KeyCode::Down => {
-                                if let AppState::SelectBootEntry { path, selected } = &mut self.state {
+                                if let AppState::SelectBootEntry { path, selected, .. } = &mut self.state {
                                     let entry_ref = if path.is_empty() {
                                         &self.entry
                                     } else {
@@ -275,7 +312,7 @@ impl App {
                                 }
                             }
                             KeyCode::Enter | KeyCode::Right => {
-                                if let AppState::SelectBootEntry { path, selected } = &self.state {
+                                if let AppState::SelectBootEntry { path, selected, action } = &self.state {
                                     let entry_ref = if path.is_empty() {
                                         &self.entry
                                     } else {
@@ -287,12 +324,35 @@ impl App {
                                             let mut result_path = path.clone();
                                             result_path.push(state_snapshot.1);
                                             let entry_name = child.name.clone();
-                                            self.state = AppState::ConfirmSetDefaultEntry {
-                                                path: result_path,
-                                                entry_name,
-                                            };
+                                            
+                                            match action {
+                                                Some(SelectBootEntryAction::ViewKernelInfo) => {
+                                                    let kernel_info = kernel_info::get_kernel_version_from_entry(&entry_name);
+                                                    self.state = AppState::ViewKernelInfo {
+                                                        path: result_path,
+                                                        kernel_info,
+                                                    };
+                                                }
+                                                Some(SelectBootEntryAction::Rename) => {
+                                                    let custom_names = custom_names::CustomNames::load();
+                                                    let current_name = custom_names.get_custom_name(&result_path)
+                                                        .cloned()
+                                                        .unwrap_or_else(|| entry_name.clone());
+                                                    self.state = AppState::RenameBootEntry {
+                                                        path: result_path,
+                                                        original_name: entry_name,
+                                                        input_buffer: current_name,
+                                                    };
+                                                }
+                                                None => {
+                                                    self.state = AppState::ConfirmSetDefaultEntry {
+                                                        path: result_path,
+                                                        entry_name,
+                                                    };
+                                                }
+                                            }
                                         } else if child.entry_type == EntryType::Submenu {
-                                            if let AppState::SelectBootEntry { path: p, selected: s } = &mut self.state {
+                                            if let AppState::SelectBootEntry { path: p, selected: s, action: a } = &mut self.state {
                                                 p.push(state_snapshot.1);
                                                 *s = 0;
                                             }
@@ -301,7 +361,7 @@ impl App {
                                 }
                             }
                             KeyCode::Left => {
-                                if let AppState::SelectBootEntry { path, selected } = &mut self.state {
+                                if let AppState::SelectBootEntry { path, selected, .. } = &mut self.state {
                                     if !path.is_empty() {
                                         path.pop();
                                         *selected = 0;
@@ -313,7 +373,7 @@ impl App {
                             }
                             _ => {
                                 if let Some(c) = Self::key_to_char(&key) {
-                                    if let AppState::SelectBootEntry { path, .. } = &self.state {
+                                    if let AppState::SelectBootEntry { path, action, .. } = &self.state {
                                         self.start_boot_entry_search(c, path.clone());
                                     }
                                 }
@@ -328,6 +388,7 @@ impl App {
                                     self.state = AppState::SelectBootEntry {
                                         path,
                                         selected: 0,
+                                        action: None,
                                     };
                                 }
                             }
@@ -964,6 +1025,191 @@ impl App {
                             _ => {}
                         }
                     }
+                    10 => { // ViewKernelInfo
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Left => {
+                                self.state = AppState::MainMenu { selected: 0 };
+                            }
+                            _ => {}
+                        }
+                    }
+                    11 => { // CleanupKernels
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Left => {
+                                self.state = AppState::MainMenu { selected: 0 };
+                            }
+                            KeyCode::Up => {
+                                if let AppState::CleanupKernels { kernels, selected } = &mut self.state {
+                                    if kernels.is_empty() {
+                                        return Ok(());
+                                    }
+                                    if *selected == 0 {
+                                        *selected = kernels.len() - 1;
+                                    } else {
+                                        *selected -= 1;
+                                    }
+                                }
+                            }
+                            KeyCode::Down => {
+                                if let AppState::CleanupKernels { kernels, selected } = &mut self.state {
+                                    if kernels.is_empty() {
+                                        return Ok(());
+                                    }
+                                    *selected = (*selected + 1) % kernels.len();
+                                }
+                            }
+                            KeyCode::Enter => {
+                                if let AppState::CleanupKernels { kernels, selected } = &self.state {
+                                    if let Some(kernel) = kernels.get(*selected) {
+                                        if !kernel.in_use {
+                                            match kernel_cleanup::delete_kernel_files(&kernel.version) {
+                                                Ok(_) => {
+                                                    let mut new_kernels = kernel_cleanup::scan_unused_kernels();
+                                                    let new_selected = (*selected).min(new_kernels.len().saturating_sub(1));
+                                                    self.state = AppState::CleanupKernels {
+                                                        kernels: new_kernels,
+                                                        selected: new_selected,
+                                                    };
+                                                }
+                                                Err(e) => {
+                                                    self.state = AppState::Message {
+                                                        title: "Error".to_string(),
+                                                        content: vec![format!("Failed to delete kernel: {}", e)],
+                                                        message_type: MessageType::Error,
+                                                    };
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    12 => { // RenameBootEntry
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Left => {
+                                self.state = AppState::MainMenu { selected: 0 };
+                            }
+                            KeyCode::Enter => {
+                                if let AppState::RenameBootEntry { path, input_buffer, .. } = &self.state {
+                                    let mut custom_names = custom_names::CustomNames::load();
+                                    custom_names.set_custom_name(path, input_buffer.clone());
+                                    if let Err(e) = custom_names.save() {
+                                        self.state = AppState::Message {
+                                            title: "Error".to_string(),
+                                            content: vec![format!("Failed to save custom name: {}", e)],
+                                            message_type: MessageType::Error,
+                                        };
+                                    } else {
+                                        self.state = AppState::Message {
+                                            title: "Success".to_string(),
+                                            content: vec!["Custom name saved successfully!".to_string()],
+                                            message_type: MessageType::Success,
+                                        };
+                                    }
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                if let AppState::RenameBootEntry { input_buffer, .. } = &mut self.state {
+                                    input_buffer.pop();
+                                }
+                            }
+                            _ => {
+                                if let Some(c) = Self::key_to_char(&key) {
+                                    if let AppState::RenameBootEntry { input_buffer, .. } = &mut self.state {
+                                        input_buffer.push(c);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    13 => { // BackupManager
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Left => {
+                                self.state = AppState::MainMenu { selected: 0 };
+                            }
+                            KeyCode::Up => {
+                                if let AppState::BackupManager { backups, selected } = &mut self.state {
+                                    if backups.is_empty() {
+                                        return Ok(());
+                                    }
+                                    if *selected == 0 {
+                                        *selected = backups.len() - 1;
+                                    } else {
+                                        *selected -= 1;
+                                    }
+                                }
+                            }
+                            KeyCode::Down => {
+                                if let AppState::BackupManager { backups, selected } = &mut self.state {
+                                    if backups.is_empty() {
+                                        return Ok(());
+                                    }
+                                    *selected = (*selected + 1) % backups.len();
+                                }
+                            }
+                            KeyCode::Enter => {
+                                if let AppState::BackupManager { backups, selected } = &self.state {
+                                    if let Some(backup) = backups.get(*selected) {
+                                        match backup_manager::restore_backup(&backup.path) {
+                                            Ok(_) => {
+                                                self.state = AppState::Message {
+                                                    title: "Success".to_string(),
+                                                    content: vec![
+                                                        "Backup restored successfully!".to_string(),
+                                                        "".to_string(),
+                                                        "Please run:".to_string(),
+                                                        "  sudo update-grub".to_string(),
+                                                    ],
+                                                    message_type: MessageType::Success,
+                                                };
+                                            }
+                                            Err(e) => {
+                                                self.state = AppState::Message {
+                                                    title: "Error".to_string(),
+                                                    content: vec![format!("Failed to restore backup: {}", e)],
+                                                    message_type: MessageType::Error,
+                                                };
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char('d') | KeyCode::Char('D') => {
+                                if let AppState::BackupManager { backups, selected } = &self.state {
+                                    if let Some(backup) = backups.get(*selected) {
+                                        match backup_manager::delete_backup(&backup.path) {
+                                            Ok(_) => {
+                                                let new_backups = backup_manager::list_backups();
+                                                let new_selected = (*selected).min(new_backups.len().saturating_sub(1));
+                                                self.state = AppState::BackupManager {
+                                                    backups: new_backups,
+                                                    selected: new_selected,
+                                                };
+                                            }
+                                            Err(e) => {
+                                                self.state = AppState::Message {
+                                                    title: "Error".to_string(),
+                                                    content: vec![format!("Failed to delete backup: {}", e)],
+                                                    message_type: MessageType::Error,
+                                                };
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    14 => { // ValidateGrub
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Enter | KeyCode::Left => {
+                                self.state = AppState::MainMenu { selected: 0 };
+                            }
+                            _ => {}
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -978,6 +1224,7 @@ impl App {
                 self.state = AppState::SelectBootEntry {
                     path: vec![],
                     selected: 0,
+                    action: None,
                 };
             }
             1 => {
@@ -1018,6 +1265,55 @@ impl App {
             3 => {
                 // View Default Boot Entry
                 self.state = AppState::ViewDefaultEntry;
+            }
+            4 => {
+                // View Kernel Info - need to show entry selection first
+                self.state = AppState::SelectBootEntry {
+                    path: vec![],
+                    selected: 0,
+                    action: Some(SelectBootEntryAction::ViewKernelInfo),
+                };
+            }
+            5 => {
+                // Cleanup Old Kernels
+                let kernels = kernel_cleanup::scan_unused_kernels();
+                self.state = AppState::CleanupKernels {
+                    kernels,
+                    selected: 0,
+                };
+            }
+            6 => {
+                // Rename Boot Entry - need to show entry selection first
+                self.state = AppState::SelectBootEntry {
+                    path: vec![],
+                    selected: 0,
+                    action: Some(SelectBootEntryAction::Rename),
+                };
+            }
+            7 => {
+                // Backup Manager
+                let backups = backup_manager::list_backups();
+                self.state = AppState::BackupManager {
+                    backups,
+                    selected: 0,
+                };
+            }
+            8 => {
+                // Validate GRUB Config
+                match grub_validate::validate_grub_config() {
+                    Ok(result) => {
+                        self.state = AppState::ValidateGrub {
+                            result: Some(result),
+                        };
+                    }
+                    Err(e) => {
+                        self.state = AppState::Message {
+                            title: "Error".to_string(),
+                            content: vec![format!("Failed to validate GRUB config: {}", e)],
+                            message_type: MessageType::Error,
+                        };
+                    }
+                }
             }
             _ => {}
         }
@@ -1116,6 +1412,11 @@ impl App {
                     ListItem::new("⚙ Configure Kernel Parameters"),
                     ListItem::new("⏱ Configure GRUB Timeout"),
                     ListItem::new("👁 View Default Boot Entry"),
+                    ListItem::new("ℹ️  View Kernel Info"),
+                    ListItem::new("🧹 Cleanup Old Kernels"),
+                    ListItem::new("✏️  Rename Boot Entry"),
+                    ListItem::new("💾 Backup Manager"),
+                    ListItem::new("✓ Validate GRUB Config"),
                 ]
                 .into_iter()
                 .map(|item| item.style(Style::default().fg(Color::White)))
@@ -1166,7 +1467,7 @@ impl App {
                 state.select(Some(*selected));
                 f.render_stateful_widget(list, chunks[1], &mut state);
             }
-            AppState::SelectBootEntry { path, selected } => {
+            AppState::SelectBootEntry { path, selected, action: _ } => {
                 let entry_ref = if path.is_empty() {
                     &self.entry
                 } else {
@@ -1452,6 +1753,162 @@ impl App {
                     .block(Block::default().borders(Borders::ALL).title("Confirm"))
                     .alignment(Alignment::Center);
                 f.render_widget(dialog, chunks[1]);
+            }
+            AppState::ViewKernelInfo { path, kernel_info } => {
+                let entry = get_entry(&self.entry, path);
+                let mut content = vec![
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("Entry: ", Style::default().fg(Color::Blue)),
+                        Span::raw(&entry.name),
+                    ]),
+                    Line::from(""),
+                ];
+                
+                if let Some(info) = kernel_info {
+                    content.push(Line::from(vec![
+                        Span::styled("Kernel Version: ", Style::default().fg(Color::Green)),
+                        Span::raw(&info.version),
+                    ]));
+                    content.push(Line::from(vec![
+                        Span::styled("Release: ", Style::default().fg(Color::Green)),
+                        Span::raw(&info.release),
+                    ]));
+                    content.push(Line::from(vec![
+                        Span::styled("Architecture: ", Style::default().fg(Color::Green)),
+                        Span::raw(&info.arch),
+                    ]));
+                    content.push(Line::from(vec![
+                        Span::styled("Path: ", Style::default().fg(Color::Green)),
+                        Span::raw(&info.path),
+                    ]));
+                } else {
+                    content.push(Line::from(vec![
+                        Span::styled("Kernel info not found", Style::default().fg(Color::Yellow)),
+                    ]));
+                }
+                
+                let info = Paragraph::new(content)
+                    .block(Block::default().borders(Borders::ALL).title("Kernel Information"))
+                    .alignment(Alignment::Left);
+                f.render_widget(info, chunks[1]);
+            }
+            AppState::CleanupKernels { kernels, selected } => {
+                let items: Vec<ListItem> = if kernels.is_empty() {
+                    vec![ListItem::new("No unused kernels found")]
+                } else {
+                    kernels.iter()
+                        .map(|k| {
+                            let size_str = kernel_cleanup::format_size(k.size);
+                            let status = if k.in_use { "⚠ IN USE" } else { "✓ Safe to remove" };
+                            ListItem::new(format!("{} - {} ({}) - {}", 
+                                k.version, size_str, k.files.len(), status))
+                        })
+                        .collect()
+                };
+                
+                let list = List::new(items)
+                    .block(Block::default().borders(Borders::ALL).title("Unused Kernels"))
+                    .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+                    .highlight_symbol(">> ");
+                
+                let mut state = ListState::default();
+                if !kernels.is_empty() {
+                    state.select(Some(*selected));
+                }
+                f.render_stateful_widget(list, chunks[1], &mut state);
+            }
+            AppState::RenameBootEntry { path, original_name, input_buffer } => {
+                let mut content = vec![
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("Original Name: ", Style::default().fg(Color::Blue)),
+                        Span::raw(original_name),
+                    ]),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("New Name: ", Style::default().fg(Color::Green)),
+                        Span::raw(input_buffer),
+                    ]),
+                    Line::from(""),
+                    Line::from("Press Enter to save, ESC to cancel"),
+                ];
+                
+                let info = Paragraph::new(content)
+                    .block(Block::default().borders(Borders::ALL).title("Rename Boot Entry"))
+                    .alignment(Alignment::Left);
+                f.render_widget(info, chunks[1]);
+            }
+            AppState::BackupManager { backups, selected } => {
+                let items: Vec<ListItem> = if backups.is_empty() {
+                    vec![ListItem::new("No backups found")]
+                } else {
+                    backups.iter()
+                        .map(|b| {
+                            let size_str = backup_manager::format_size(b.size);
+                            let time_str = backup_manager::format_time(b.modified);
+                            let name = b.path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("unknown");
+                            ListItem::new(format!("{} - {} - {}", name, size_str, time_str))
+                        })
+                        .collect()
+                };
+                
+                let list = List::new(items)
+                    .block(Block::default().borders(Borders::ALL).title("Backup Manager"))
+                    .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+                    .highlight_symbol(">> ");
+                
+                let mut state = ListState::default();
+                if !backups.is_empty() {
+                    state.select(Some(*selected));
+                }
+                f.render_stateful_widget(list, chunks[1], &mut state);
+            }
+            AppState::ValidateGrub { result } => {
+                let mut content = vec![Line::from("")];
+                
+                if let Some(r) = result {
+                    if r.valid {
+                        content.push(Line::from(vec![
+                            Span::styled("✓ Configuration is valid", Style::default().fg(Color::Green)),
+                        ]));
+                    } else {
+                        content.push(Line::from(vec![
+                            Span::styled("✗ Configuration has errors", Style::default().fg(Color::Red)),
+                        ]));
+                    }
+                    
+                    if !r.errors.is_empty() {
+                        content.push(Line::from(""));
+                        content.push(Line::from(vec![
+                            Span::styled("Errors:", Style::default().fg(Color::Red)),
+                        ]));
+                        for error in &r.errors {
+                            content.push(Line::from(format!("  - {}", error)));
+                        }
+                    }
+                    
+                    if !r.warnings.is_empty() {
+                        content.push(Line::from(""));
+                        content.push(Line::from(vec![
+                            Span::styled("Warnings:", Style::default().fg(Color::Yellow)),
+                        ]));
+                        for warning in &r.warnings {
+                            content.push(Line::from(format!("  - {}", warning)));
+                        }
+                    }
+                } else {
+                    content.push(Line::from(vec![
+                        Span::styled("Validating...", Style::default().fg(Color::Yellow)),
+                    ]));
+                }
+                
+                let info = Paragraph::new(content)
+                    .block(Block::default().borders(Borders::ALL).title("GRUB Configuration Validation"))
+                    .alignment(Alignment::Left);
+                f.render_widget(info, chunks[1]);
             }
             AppState::Message { title, content, message_type } => {
                 let color = match message_type {

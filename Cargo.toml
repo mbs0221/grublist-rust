@@ -1,6 +1,6 @@
 [package]
 name = "grublist"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2021"
 authors = ["Benshan Mei <mbs2021@163.com>"]
 description = "A Rust implementation of grub selection tool with interactive menu interface"
@@ -18,4 +18,7 @@ path = "src/main.rs"
 regex = "1.10"
 ratatui = "0.27"
 crossterm = "0.28"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = "0.4"
 

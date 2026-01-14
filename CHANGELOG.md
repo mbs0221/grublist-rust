@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2024-12-XX
+
+### Added
+- **Kernel Version Information Display**: View kernel version, release, architecture, and file path for each boot entry
+- **Kernel Cleanup Tool**: Scan and delete unused kernel versions to free up disk space
+- **Boot Entry Renaming**: Set custom names for boot entries for easier identification
+- **Backup Manager**: View, restore, and delete GRUB configuration backups
+- **GRUB Configuration Validation**: Validate GRUB configuration syntax using grub-mkconfig
+
+### Changed
+- Main menu now includes 5 new management tools
+- Enhanced boot entry selection to support different actions (set default, view info, rename)
+
+### Technical
+- Added new modules: `kernel_info`, `kernel_cleanup`, `custom_names`, `backup_manager`, `grub_validate`
+- Added dependencies: `serde`, `serde_json`, `chrono` for data serialization and time handling
+
 ## [0.1.5] - 2024-12-XX
 
 ### Added
