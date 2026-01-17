@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{self, BufRead, BufReader};
+use std::io::{BufRead, BufReader};
 use std::fs::File;
 use std::collections::HashMap;
 use regex::Regex;
@@ -52,7 +52,22 @@ impl GrubConfig {
         }
         
         // Extract commonly used parameters for backward compatibility
-        let grub_default = params.get("GRUB_DEFAULT").cloned().unwrap_or_default();
+        let mut grub_default = params.get("GRUB_DEFAULT").cloned().unwrap_or_default();
+        
+        // Check if GRUB_DEFAULT uses old format and warn
+        if !grub_default.is_empty() && grub_default != "saved" {
+            if crate::grub_validate::is_old_grub_default_format(&grub_default) {
+                // Try to load GRUB entries and fix the format
+                if let Some(grub_entry) = crate::grub::load_grub() {
+                    if let Some(fixed_value) = crate::grub_validate::fix_old_grub_default_format(&grub_default, &grub_entry) {
+                        // Update the value in params
+                        params.insert("GRUB_DEFAULT".to_string(), fixed_value.clone());
+                        grub_default = fixed_value;
+                    }
+                }
+            }
+        }
+        
         let grub_cmdline_linux = params.get("GRUB_CMDLINE_LINUX").cloned().unwrap_or_default();
         let grub_cmdline_linux_default = params.get("GRUB_CMDLINE_LINUX_DEFAULT").cloned().unwrap_or_default();
         let grub_timeout = params.get("GRUB_TIMEOUT").cloned().unwrap_or_else(|| "5".to_string());
@@ -66,6 +81,23 @@ impl GrubConfig {
             grub_timeout,
             grub_timeout_style,
         })
+    }
+    
+    /// Validate and fix GRUB_DEFAULT format if needed
+    /// Returns true if the value was fixed
+    pub fn validate_and_fix_grub_default(&mut self, grub_entry: &crate::grub::Entry) -> bool {
+        if self.grub_default.is_empty() || self.grub_default == "saved" {
+            return false;
+        }
+        
+        if crate::grub_validate::is_old_grub_default_format(&self.grub_default) {
+            if let Some(fixed_value) = crate::grub_validate::fix_old_grub_default_format(&self.grub_default, grub_entry) {
+                self.set("GRUB_DEFAULT", fixed_value);
+                return true;
+            }
+        }
+        
+        false
     }
     
     pub fn get(&self, key: &str) -> Option<&String> {
@@ -499,14 +531,14 @@ pub fn set_default_entry(entry: &crate::grub::Entry, path: &[usize], bcolors: &c
 
 // Function 2: View current default boot entry
 pub fn view_default_entry(entry: &crate::grub::Entry, bcolors: &colorprint::Bcolors) {
-    use std::io::{self, Write};
+    use std::io::{Write, stdin};
     
-    let config = match GrubConfig::load() {
+    let mut config = match GrubConfig::load() {
         Ok(c) => c,
         Err(e) => {
             println!("{}Error loading config: {}{}", bcolors.fail(""), e, bcolors.endc());
             println!("\nPress Enter to continue...");
-            let _ = io::stdin().read_line(&mut String::new());
+            let _ = stdin().read_line(&mut String::new());
             return;
         }
     };
@@ -531,6 +563,54 @@ pub fn view_default_entry(entry: &crate::grub::Entry, bcolors: &colorprint::Bcol
                 bcolors.endc());
         println!();
         
+        // Check if using old format
+        if crate::grub_validate::is_old_grub_default_format(&config.grub_default) {
+            println!("{}⚠️  WARNING: Using old title format!{}", 
+                    bcolors.warning(), bcolors.endc());
+            println!();
+            println!("GRUB recommends using numeric path format (e.g., '0>2') instead of");
+            println!("old title format (e.g., 'Ubuntu, with Linux 6.5.0-rc2-snp-host-ec25de0e7141').");
+            println!();
+            println!("{}Would you like to fix this automatically? [Y/n]: {}", 
+                    bcolors.bold(), bcolors.endc());
+            std::io::stdout().flush().unwrap();
+            
+            let mut input = String::new();
+            if stdin().read_line(&mut input).is_ok() {
+                let answer = input.trim().to_lowercase();
+                if answer == "y" || answer == "yes" || answer.is_empty() {
+                    if config.validate_and_fix_grub_default(entry) {
+                        match config.save() {
+                            Ok(_) => {
+                                println!();
+                                println!("{}✓ Fixed! GRUB_DEFAULT has been updated to use numeric path format.{}", 
+                                        bcolors.okgreen(""), bcolors.endc());
+                                println!();
+                                println!("{}Please run: {}{}", 
+                                        bcolors.warning(), 
+                                        bcolors.bold(),
+                                        bcolors.endc());
+                                println!("  {}{}{}", bcolors.bold(), "sudo update-grub", bcolors.endc());
+                                println!();
+                            }
+                            Err(e) => {
+                                println!();
+                                println!("{}Error saving fixed configuration: {}{}", 
+                                        bcolors.fail(""), e, bcolors.endc());
+                                println!();
+                            }
+                        }
+                    } else {
+                        println!();
+                        println!("{}Could not automatically fix the format.{}", 
+                                bcolors.warning(), bcolors.endc());
+                        println!("Please manually update GRUB_DEFAULT in /etc/default/grub");
+                        println!();
+                    }
+                }
+            }
+        }
+        
         // Try to find and display the entry name
         let path_str = config.grub_default.trim_matches('"').trim_matches('\'');
         let path: Result<Vec<usize>, _> = path_str.split('>')
@@ -549,12 +629,16 @@ pub fn view_default_entry(entry: &crate::grub::Entry, bcolors: &colorprint::Bcol
                         path_str,
                         bcolors.endc());
             }
+        } else {
+            // Not a numeric path, might be old format or other format
+            println!("{}Note: Current format is not a numeric path.{}", 
+                    bcolors.okblue(""), bcolors.endc());
         }
     }
     
     println!();
     println!("Press Enter to continue...");
-    let _ = io::stdin().read_line(&mut String::new());
+    let _ = stdin().read_line(&mut String::new());
 }
 
 // Function 3: Configure GRUB timeout

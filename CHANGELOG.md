@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-01-XX
+
+### Added
+- **GRUB_DEFAULT Format Validation and Auto-Fix**: Automatic detection and fixing of old GRUB_DEFAULT format
+  - Detects old title format (e.g., `Ubuntu, with Linux 6.5.0-rc2-snp-host-ec25de0e7141`)
+  - Automatically converts to numeric path format (e.g., `0>2`) when loading configuration
+  - Interactive warning and auto-fix prompt when viewing default boot entry with old format
+  - Supports GRUB version detection for format compatibility
+
+### Enhanced
+- **GRUB Validation Module**: Extended `grub_validate` module with new functions
+  - `get_grub_version()`: Detect GRUB version (major.minor)
+  - `is_old_grub_default_format()`: Check if GRUB_DEFAULT uses deprecated title format
+  - `fix_old_grub_default_format()`: Convert old title format to numeric path format
+- **Configuration Loading**: Enhanced `GrubConfig::load()` to automatically detect and fix old formats
+- **View Default Entry**: Added warning and auto-fix option when old format is detected
+
+### Fixed
+- Resolves GRUB warnings about using old title format for GRUB_DEFAULT
+- Ensures compatibility with GRUB 2.00+ requirements
+
+### Technical
+- Added format validation logic in `grub_validate` module
+- Enhanced `GrubConfig` with `validate_and_fix_grub_default()` method
+- Improved error handling and user feedback for format issues
+
 ## [0.3.0] - 2026-01-15
 
 ### Added
